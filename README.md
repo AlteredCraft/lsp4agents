@@ -8,7 +8,8 @@ checker, which ships with an LSP server).
 > **New to LSP?** Start with [`documentation.md`](./documentation.md) — protocol
 > concepts (message shapes, lifecycle, the rename workflow, diagnostics) with
 > diagrams and spec links. This README is about the *script*: how to run it and
-> the exact session it drives.
+> the exact session it drives. Where this is all heading — the design for an
+> LSP-backed agent refactor tool — is captured in [`planning.md`](./planning.md).
 
 ## Setup
 
@@ -162,6 +163,9 @@ Good next experiments against the same files:
 - `documentation.md` — conceptual LSP notes (primitives, lifecycle, the
   rename workflow, push-vs-pull diagnostics) with diagrams and spec links.
   Start here for the big picture; this README covers the script specifically.
+- `planning.md` — design decisions and open questions for turning this spike
+  into an LSP-backed refactor tool for an agent harness (semantic CLI, the
+  stateless-vs-stateful question, multi-language backend).
 - `lsp_raw_client.py` — the client described above.
 - `sample.py` — small program defining `greet`, with a deliberate type
   error (`greet(123)` where `greet` expects `str`) plus two decoy uses of
