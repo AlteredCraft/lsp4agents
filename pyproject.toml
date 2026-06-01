@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "multilspy>=0.0.15",
     "ty>=0.0.37",
 ]
 

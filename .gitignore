@@ -15,3 +15,6 @@ wheels/
 
 # Vscode-specific files
 .vscode/
+
+# Rust build artifacts (Cargo.lock is kept — this is a binary, not a library)
+lsp-tool-rs/target/

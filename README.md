@@ -8,8 +8,9 @@ checker, which ships with an LSP server).
 > **New to LSP?** Start with [`documentation.md`](./documentation.md) — protocol
 > concepts (message shapes, lifecycle, the rename workflow, diagnostics) with
 > diagrams and spec links. This README is about the *script*: how to run it and
-> the exact session it drives. Where this is all heading — the design for an
-> LSP-backed agent refactor tool — is captured in [`planning.md`](./planning.md).
+> the exact session it drives. The design for where this is heading — an
+> LSP-backed agent refactor tool — is in [`planning.md`](./planning.md), and two
+> working v0 prototypes of that tool are compared in [`comparison.md`](./comparison.md).
 
 ## Setup
 
@@ -37,7 +38,7 @@ LSP is just JSON-RPC 2.0 framed with `Content-Length` headers. Libraries
 like `pygls`, `lsprotocol`, or VS Code's client hide that under typed
 request/response helpers, which is great for building tools but bad for
 learning what's actually on the wire. This script keeps the framing,
-the lifecycle, and the message shapes all in one ~300-line file you can
+the lifecycle, and the message shapes all in one ~450-line file you can
 read top to bottom.
 
 ### Transport
@@ -158,7 +159,37 @@ Good next experiments against the same files:
   update — the core loop of an interactive client. This pairs naturally
   with `apply_text_edits` to keep the server's view and disk in sync.
 
-### Files
+## Beyond the testbed: the `lsp-tool` CLIs
+
+The script is a teaching artifact. The next step — designed in
+[`planning.md`](./planning.md) — is a real tool: a stateless CLI an agent
+harness shells out to for `rename` and `diagnostics`. Two v0 prototypes of it
+live in this repo, both implementing the same CLI contract (JSON on stdout):
+
+- **`lsp-tool-rs/`** — hand-rolled Rust, drives **ty**.
+- **`lsp_tool_mls.py`** — Python on **multilspy** (which drives jedi).
+
+Run them **from the repo root** (both default `--workspace` to `.`; the Rust one
+defaults its server to `uv run ty server`):
+
+```bash
+# Rust v0 — the first `cargo run` compiles, then it's instant
+cargo run --manifest-path lsp-tool-rs/Cargo.toml -- diagnostics sample.py
+cargo run --manifest-path lsp-tool-rs/Cargo.toml -- rename sample.py 5 10 salutation
+
+# Python v0
+uv run python lsp_tool_mls.py diagnostics sample.py
+uv run python lsp_tool_mls.py rename sample.py 5 10 salutation
+```
+
+`rename` takes `<file> <line> <character> <new-name>` (0-indexed). Without
+`--apply` it just prints the `WorkspaceEdit`; add `--apply` to edit the files in
+place (restore with `git checkout sample.py consumer.py`).
+
+[`comparison.md`](./comparison.md) puts the two side by side — behavior (ty
+catches `sample.py`'s type error; jedi doesn't) and lines-of-code-to-maintain.
+
+## Files
 
 - `documentation.md` — conceptual LSP notes (primitives, lifecycle, the
   rename workflow, push-vs-pull diagnostics) with diagrams and spec links.
@@ -166,6 +197,8 @@ Good next experiments against the same files:
 - `planning.md` — design decisions and open questions for turning this spike
   into an LSP-backed refactor tool for an agent harness (semantic CLI, the
   stateless-vs-stateful question, multi-language backend).
+- `comparison.md` — the two v0 implementations below, compared on behavior and
+  lines-of-code-to-maintain.
 - `lsp_raw_client.py` — the client described above.
 - `sample.py` — small program defining `greet`, with a deliberate type
   error (`greet(123)` where `greet` expects `str`) plus two decoy uses of
@@ -174,10 +207,13 @@ Good next experiments against the same files:
   rename produces edits in two files (the cross-file case).
 - `test_apply.py` — tests for the WorkspaceEdit apply logic (UTF-16 offset
   conversion, bottom-to-top application, both edit encodings). `uv run pytest`.
-- `pyproject.toml` / `uv.lock` — pin ty so the protocol output is
-  reproducible across runs.
+- `lsp-tool-rs/` — v0 of the real tool in Rust: hand-rolled framing, a ty-driven
+  `rename`/`diagnostics` CLI, and a UTF-16-aware applier. Build/run with `cargo`.
+- `lsp_tool_mls.py` — v0 of the same tool in Python on multilspy (drives jedi).
+- `pyproject.toml` / `uv.lock` — pin `ty` (protocol output), `multilspy` (the
+  Python v0), and dev tools (`pytest`, `ruff`). The lockfile keeps runs reproducible.
 
-### References
+## References
 
 [documentation.md](./documentation.md) carries the concept notes and the deep
 links into the LSP 3.17 spec. External:
