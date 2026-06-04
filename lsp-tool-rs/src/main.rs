@@ -26,8 +26,10 @@ struct Cli {
     #[arg(long, default_value = ".")]
     workspace: PathBuf,
 
-    /// Language-server command (whitespace-split).
-    #[arg(long, default_value = "uv run ty server")]
+    /// Language-server command (whitespace-split). Default is the uv-managed ty
+    /// binary (`uv sync` puts it at `.venv/bin/ty`) — exec'd directly, no `uv
+    /// run` wrapper. Override per language.
+    #[arg(long, default_value = ".venv/bin/ty server")]
     server_cmd: String,
 
     #[command(subcommand)]

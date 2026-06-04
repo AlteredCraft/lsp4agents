@@ -1,10 +1,12 @@
 # Planning — an LSP-backed refactor tool for an agent harness
 
-Where this testbed is heading. The runnable spike is
-[`lsp_raw_client.py`](./lsp_raw_client.py); protocol mechanics live in
-[documentation.md](./documentation.md). This file is the *why* and the *open
-questions* behind building a real tool — an LSP-driven rename/refactor
-capability for an LLM agent harness ([Tilth](https://github.com/AlteredCraft/tilth)).
+Where this testbed is heading. The protocol spike is
+[`lsp_raw_client.py`](./lsp_raw_client.py) (mechanics in
+[documentation.md](./documentation.md)); the tool itself is now being built in
+Rust under [`lsp-tool-rs/`](./lsp-tool-rs/) — a working v0 exists (see
+[comparison.md](./comparison.md)). This file is the *why* and the remaining
+*open questions* behind that tool — an LSP-driven rename/refactor capability for
+an LLM agent harness ([Tilth](https://github.com/AlteredCraft/tilth)).
 
 Status tags: **[decided]** · **[leaning]** · **[open]**.
 
@@ -47,15 +49,24 @@ Mitigation (later): after a rename, `grep` the *old* name and surface leftovers
 as "review these" instead of auto-editing — LSP precision + grep recall, with
 the LLM/human adjudicating the tail.
 
+**Implementation: Rust. [decided]**
+The tool is built in Rust ([`lsp-tool-rs/`](./lsp-tool-rs/)). A
+Python-on-multilspy v0 was trialed and lost on the points that matter
+([comparison.md](./comparison.md)): multilspy covers neither rename nor
+diagnostics (you drop to raw LSP anyway) and locks Python to jedi (no
+type-checking), whereas a hand-rolled client picks the server (ty) and ships one
+fast static binary. Rust also can't reuse those Python libraries — which closes
+the build-vs-reuse question below.
+
 ## Packaging: out-of-process CLI
 
-**A standalone CLI, shelled out to by the harness. [leaning]** (MCP deferred.)
+**A standalone CLI, shelled out to by the harness. [decided]** (MCP deferred.)
 Tilth is adding out-of-process tools and prefers a simple CLI over MCP. This
 fits Tilth's existing seams with near-zero new infrastructure:
 
 - **Out-of-process:** a standalone `lsp-tool` CLI (`rename`, `diagnostics`,
-  `references` subcommands; JSON out). This is `lsp_raw_client.py` + the apply
-  code, grown up.
+  `references` subcommands; JSON out) — the Rust v0 in
+  [`lsp-tool-rs/`](./lsp-tool-rs/).
 - **In-process:** a thin `rename_symbol` tool whose `fn(args, workspace)`
   `subprocess.run`s the CLI — the same pattern Tilth's `bash`/`validators`
   already use. Schema + validation stay in-process (good for a weak model);
@@ -130,14 +141,35 @@ Per-language reality to design for — the part that bites:
   (e.g. rust-analyzer renaming a module renames a file). The testbed applier
   punts on resource ops — the real one can't.
 
-## Build vs. reuse [open]
+## Acquiring the language servers [decided]
 
-Before hand-rolling five servers' quirks, evaluate **multilspy** / **solidlsp**
-(the library under Serena) as the backend — both are Python and already abstract
-the lifecycle/capability mess across several target languages. Keep the thin
-semantic verbs on top. Hand-roll only if their coverage or edit-application
-doesn't fit Tilth's worktree/disk model. `lsp_raw_client.py` stays valuable for
-understanding and debugging whatever sits underneath.
+The tool **does not bundle servers** — each is bring-your-own, on a known path,
+with per-language acquire instructions in the docs. The tool spawns the
+configured command and, if it's missing, fails fast with that install hint (the
+harness's "detect missing, fail fast" rule). Pin a version per language so
+rename/diagnostics stay reproducible.
+
+| lang | server | acquire | default command |
+|---|---|---|---|
+| **Python** | **ty** | **`uv sync` (project dep) → `.venv/bin/ty`** | **`.venv/bin/ty server`** |
+| Go | gopls | `go install golang.org/x/tools/gopls@latest` | `gopls` (on PATH) |
+| Rust | rust-analyzer | `rustup component add rust-analyzer` | `rust-analyzer` |
+| TS | typescript-language-server | `npm i -g typescript-language-server` | `typescript-language-server --stdio` |
+
+**Python is decided:** use uv and expect ty at `.venv/bin/ty` — uv acquires and
+pins it via `uv.lock`, and the tool execs the binary directly (no `uv run`
+wrapper, no Python in the process tree). The other rows are sketches until each
+language is brought online.
+
+## Build vs. reuse [decided]
+
+Hand-roll, in Rust. The Python-on-multilspy v0 ([comparison.md](./comparison.md))
+settled it: multilspy abstracts only the lifecycle — it covers neither rename
+nor diagnostics, so the operations that matter drop to raw LSP regardless — and
+it's Python, so a Rust tool can't reuse it (nor solidlsp). The hand-rolled Rust
+client owns the lifecycle itself: a few hundred lines, with full control over
+server choice, encodings, and the apply path. `lsp_raw_client.py` stays the
+readable reference for debugging the wire.
 
 ## Tool-surface discipline [decided]
 
@@ -155,9 +187,16 @@ reaching for them. Don't port all of LSP.
 3. **Indexing readiness** — *new for the real tool*: wait for the server to be
    ready before trusting a rename or diagnostics.
 
-## Next step [open]
+## Next steps [open]
 
-Build the stateless `lsp-tool` CLI — `rename` + `diagnostics` with the
-readiness-wait and JSON output, starting with ty and structured so a second
-language (gopls) drops in. Use it to measure the cold-start trade and resolve
-the stateless/stateful question with evidence rather than guesswork.
+The Rust v0 does `rename` + `diagnostics` against ty (stateless). Remaining:
+
+1. **Capability negotiation.** The v0 hardcodes ty's shape (pull diagnostics,
+   prepareRename, utf-16, `languageId: python`); pointing `--server-cmd` at jedi
+   already broke on `Method Not Found: textDocument/diagnostic`. Branch on the
+   server's advertised capabilities instead.
+2. **Second language (gopls)** via the acquire table above — the first real test
+   of the multi-language backend and the readiness-wait.
+3. **Resolve stateless vs. stateful** with cold-start measurements on a real
+   Rust/Go repo (ty is fast enough that stateless is fine — see the latency
+   section of [comparison.md](./comparison.md)).

@@ -159,35 +159,30 @@ Good next experiments against the same files:
   update — the core loop of an interactive client. This pairs naturally
   with `apply_text_edits` to keep the server's view and disk in sync.
 
-## Beyond the testbed: the `lsp-tool` CLIs
+## Beyond the testbed: the `lsp-tool` CLI
 
-The script is a teaching artifact. The next step — designed in
-[`planning.md`](./planning.md) — is a real tool: a stateless CLI an agent
-harness shells out to for `rename` and `diagnostics`. Two v0 prototypes of it
-live in this repo, both implementing the same CLI contract (JSON on stdout):
+The script is a teaching artifact. The real tool — designed in
+[`planning.md`](./planning.md) — is a stateless CLI an agent harness shells out
+to for `rename` and `diagnostics`. **It's being built in Rust** under
+[`lsp-tool-rs/`](./lsp-tool-rs/), driving ty directly (the v0 spawns the
+uv-managed `.venv/bin/ty` binary — no Python in the loop). An earlier
+Python-on-multilspy trial lives in [`lsp-tool-py/`](./lsp-tool-py/), kept for the
+comparison that decided the language — see [`comparison.md`](./comparison.md).
 
-- **`lsp-tool-rs/`** — hand-rolled Rust, drives **ty**.
-- **`lsp_tool_mls.py`** — Python on **multilspy** (which drives jedi).
-
-Run them **from the repo root** (both default `--workspace` to `.`; the Rust one
-defaults its server to `uv run ty server`):
+Run from the repo root (`--workspace` defaults to `.`):
 
 ```bash
-# Rust v0 — the first `cargo run` compiles, then it's instant
+# Rust — the implementation. First `cargo run` compiles, then it's instant.
 cargo run --manifest-path lsp-tool-rs/Cargo.toml -- diagnostics sample.py
 cargo run --manifest-path lsp-tool-rs/Cargo.toml -- rename sample.py 5 10 salutation
 
-# Python v0
-uv run python lsp_tool_mls.py diagnostics sample.py
-uv run python lsp_tool_mls.py rename sample.py 5 10 salutation
+# Python — early trial, kept for the comparison.
+uv run python lsp-tool-py/lsp_tool.py diagnostics sample.py
 ```
 
 `rename` takes `<file> <line> <character> <new-name>` (0-indexed). Without
-`--apply` it just prints the `WorkspaceEdit`; add `--apply` to edit the files in
-place (restore with `git checkout sample.py consumer.py`).
-
-[`comparison.md`](./comparison.md) puts the two side by side — behavior (ty
-catches `sample.py`'s type error; jedi doesn't) and lines-of-code-to-maintain.
+`--apply` it prints the `WorkspaceEdit`; add `--apply` to edit the files in place
+(restore with `git checkout sample.py consumer.py`).
 
 ## Files
 
@@ -207,9 +202,10 @@ catches `sample.py`'s type error; jedi doesn't) and lines-of-code-to-maintain.
   rename produces edits in two files (the cross-file case).
 - `test_apply.py` — tests for the WorkspaceEdit apply logic (UTF-16 offset
   conversion, bottom-to-top application, both edit encodings). `uv run pytest`.
-- `lsp-tool-rs/` — v0 of the real tool in Rust: hand-rolled framing, a ty-driven
+- `lsp-tool-rs/` — **the tool**, in Rust: hand-rolled framing, a ty-driven
   `rename`/`diagnostics` CLI, and a UTF-16-aware applier. Build/run with `cargo`.
-- `lsp_tool_mls.py` — v0 of the same tool in Python on multilspy (drives jedi).
+- `lsp-tool-py/` — an early Python-on-multilspy trial, superseded by the Rust
+  implementation; kept for `comparison.md`.
 - `pyproject.toml` / `uv.lock` — pin `ty` (protocol output), `multilspy` (the
   Python v0), and dev tools (`pytest`, `ruff`). The lockfile keeps runs reproducible.
 

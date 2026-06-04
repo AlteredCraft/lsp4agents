@@ -1,8 +1,9 @@
-"""lsp-tool (Python v0) — the mirror of the Rust v0, built on multilspy.
+"""lsp-tool (Python v0) — an early trial, built on multilspy. SUPERSEDED by the
+Rust implementation in ../lsp-tool-rs/; kept for ../comparison.md.
 
 Same CLI contract as the Rust binary:
-    uv run python lsp_tool_mls.py diagnostics <file>
-    uv run python lsp_tool_mls.py rename <file> <line> <character> <new-name> [--apply]
+    uv run python lsp-tool-py/lsp_tool.py diagnostics <file>
+    uv run python lsp-tool-py/lsp_tool.py rename <file> <line> <character> <new-name> [--apply]
 
 The point of this file is the *comparison*, so it's deliberately honest about
 where the library helps and where it doesn't:
@@ -29,6 +30,13 @@ from pathlib import Path
 from multilspy import LanguageServer
 from multilspy.multilspy_config import MultilspyConfig
 from multilspy.multilspy_logger import MultilspyLogger
+
+# This v0 lives in a subfolder but reuses the tested WorkspaceEdit applier from
+# the repo-root testbed. Put the repo root on sys.path so the import resolves
+# no matter where the script is launched from.
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from lsp_raw_client import apply_workspace_edit
 

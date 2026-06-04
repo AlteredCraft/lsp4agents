@@ -6,10 +6,14 @@ out), built to put evidence behind the build-vs-reuse question in
 
 - **`lsp-tool-rs/`** — hand-rolled Rust, drives **ty**. Framing, lifecycle, and
   the WorkspaceEdit applier are all written here.
-- **`lsp_tool_mls.py`** — Python on **multilspy**, which drives
+- **`lsp-tool-py/`** — Python on **multilspy**, which drives
   **jedi-language-server** (no server choice).
 
 Both were run against this repo's `sample.py` / `consumer.py`.
+
+> **Decision: the tool is built in Rust** (`lsp-tool-rs/`). The Python v0 was an
+> early trial — kept for this comparison, not as a live candidate. The findings
+> that decided it follow.
 
 ## Behavioral findings
 
@@ -32,7 +36,7 @@ cloc `code` lines (blanks/comments excluded).
 
 | | Rust (→ ty) | Python (multilspy → jedi) |
 |---|---|---|
-| **Code you author & maintain** | **373** | **~165** (85 in `lsp_tool_mls.py` + ~80 reused applier) |
+| **Code you author & maintain** | **373** | **~165** (85 in `lsp-tool-py/lsp_tool.py` + ~80 reused applier) |
 | Deps — raw source pulled in | 452,834 | 175,296 |
 | &nbsp;&nbsp;– platform-dead `windows-*` (not built on macOS) | −318,762 | — |
 | &nbsp;&nbsp;– build-time proc-macros (`syn` etc.; not shipped) | −74,937 | — |
@@ -61,3 +65,30 @@ Net: LOC favors the library on *authored* code, but the hand-rolled route trades
 ~200 extra lines you own for server choice (ty's type-checking), a single fast
 binary, and no runtime dependency on an early-stage library for the operations
 that actually matter.
+
+## Startup / per-call latency
+
+A naive `time` of each v0 is **not** apples-to-apples — two artifacts dominate
+the headline gap:
+
+- the Python `diagnostics` command sleeps ~8s polling for a push jedi never
+  sends (`rename` on the same harness is ~1s);
+- `cargo run` adds ~0.2s of build-freshness checking the shipped binary skips.
+
+Stripped to a fair comparison (`sample.py`, warm caches):
+
+| harness → server | operation | time |
+|---|---|---|
+| Rust binary → ty | rename | **0.08s** |
+| Python (lean, `lsp_raw_client.py`) → ty | full session | **0.14s** |
+| Python (multilspy) → jedi | rename | **1.08s** |
+
+**Server cold-start dominates; the harness language barely matters.** Python and
+Rust both driving ty land in the same ~0.1s ballpark — the v0s' real gap is
+**jedi vs ty** (multilspy's server lock-in again), not Python vs Rust. The Python
+startup floor (`uv run python -c pass`) is ~0.03s.
+
+For [planning.md](./planning.md)'s stateless-vs-stateful question: per-call cost
+is mostly server cold-start, so (a) pick a fast-starting server, and (b) the
+warm-server daemon's payoff is amortizing exactly that — ~0.1–0.3s/call for ty,
+but seconds-to-minutes/call for rust-analyzer/gopls on a real repo.
