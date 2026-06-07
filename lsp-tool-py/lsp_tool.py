@@ -1,5 +1,5 @@
 """lsp-tool (Python v0) — an early trial, built on multilspy. SUPERSEDED by the
-Rust implementation in ../lsp-tool-rs/; kept for ../comparison.md.
+Rust implementation in ../lsp-tool-rs/; kept for ../research.md.
 
 Same CLI contract as the Rust binary:
     uv run python lsp-tool-py/lsp_tool.py diagnostics <file>

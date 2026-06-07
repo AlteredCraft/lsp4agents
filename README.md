@@ -5,12 +5,11 @@ directly — no editor, no client library, just stdio and JSON. Currently
 points at [ty](https://docs.astral.sh/ty/) (Astral's Rust-based Python type
 checker, which ships with an LSP server).
 
-> **New to LSP?** Start with [`documentation.md`](./documentation.md) — protocol
-> concepts (message shapes, lifecycle, the rename workflow, diagnostics) with
-> diagrams and spec links. This README is about the *script*: how to run it and
-> the exact session it drives. The design for where this is heading — an
-> LSP-backed agent refactor tool — is in [`planning.md`](./planning.md), and two
-> working v0 prototypes of that tool are compared in [`comparison.md`](./comparison.md).
+> **New here?** [`documentation.md`](./documentation.md) is the decided
+> architecture of `lsp-tool` + an LSP protocol reference (diagrams, glossary,
+> spec links); [`research.md`](./research.md) holds the rationale and the
+> Rust-vs-Python comparison; [`planning.md`](./planning.md) is the thin "what's
+> next." This README is about the *script*: how to run it and the session it drives.
 
 ## Setup
 
@@ -161,13 +160,14 @@ Good next experiments against the same files:
 
 ## Beyond the testbed: the `lsp-tool` CLI
 
-The script is a teaching artifact. The real tool — designed in
-[`planning.md`](./planning.md) — is a stateless CLI an agent harness shells out
-to for `rename` and `diagnostics`. **It's being built in Rust** under
-[`lsp-tool-rs/`](./lsp-tool-rs/), driving ty directly (the v0 spawns the
-uv-managed `.venv/bin/ty` binary — no Python in the loop). An earlier
-Python-on-multilspy trial lives in [`lsp-tool-py/`](./lsp-tool-py/), kept for the
-comparison that decided the language — see [`comparison.md`](./comparison.md).
+The script is a teaching artifact. The real tool — architecture in
+[`documentation.md`](./documentation.md), plan in [`planning.md`](./planning.md)
+— is a stateless CLI an agent harness shells out to for `rename` and
+`diagnostics`. **It's being built in Rust** under [`lsp-tool-rs/`](./lsp-tool-rs/),
+driving ty directly (the v0 spawns the uv-managed `.venv/bin/ty` binary — no
+Python in the loop). An earlier Python-on-multilspy trial lives in
+[`lsp-tool-py/`](./lsp-tool-py/), kept for the comparison that decided the
+language — see [`research.md`](./research.md).
 
 Run from the repo root (`--workspace` defaults to `.`):
 
@@ -186,14 +186,12 @@ uv run python lsp-tool-py/lsp_tool.py diagnostics sample.py
 
 ## Files
 
-- `documentation.md` — conceptual LSP notes (primitives, lifecycle, the
-  rename workflow, push-vs-pull diagnostics) with diagrams and spec links.
-  Start here for the big picture; this README covers the script specifically.
-- `planning.md` — design decisions and open questions for turning this spike
-  into an LSP-backed refactor tool for an agent harness (semantic CLI, the
-  stateless-vs-stateful question, multi-language backend).
-- `comparison.md` — the two v0 implementations below, compared on behavior and
-  lines-of-code-to-maintain.
+- `documentation.md` — the decided architecture of `lsp-tool` plus an LSP
+  protocol reference (message shapes, lifecycle, rename workflow, diagnostics)
+  with diagrams, a glossary, and spec links.
+- `research.md` — the rationale behind the design, and the Rust-vs-Python v0
+  comparison (behavior, lines-of-code-to-maintain, latency).
+- `planning.md` — thin and forward-looking: current reality and next steps.
 - `lsp_raw_client.py` — the client described above.
 - `sample.py` — small program defining `greet`, with a deliberate type
   error (`greet(123)` where `greet` expects `str`) plus two decoy uses of
@@ -205,7 +203,7 @@ uv run python lsp-tool-py/lsp_tool.py diagnostics sample.py
 - `lsp-tool-rs/` — **the tool**, in Rust: hand-rolled framing, a ty-driven
   `rename`/`diagnostics` CLI, and a UTF-16-aware applier. Build/run with `cargo`.
 - `lsp-tool-py/` — an early Python-on-multilspy trial, superseded by the Rust
-  implementation; kept for `comparison.md`.
+  implementation; kept for `research.md`.
 - `pyproject.toml` / `uv.lock` — pin `ty` (protocol output), `multilspy` (the
   Python v0), and dev tools (`pytest`, `ruff`). The lockfile keeps runs reproducible.
 

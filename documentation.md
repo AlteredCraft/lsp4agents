@@ -1,13 +1,57 @@
-# LSP Notes
+# Architecture & LSP reference
 
-Conceptual notes on the Language Server Protocol, written while building this
-testbed. For how *this repo's* client works, see [README.md](./README.md); the
-runnable reference is [`lsp_raw_client.py`](./lsp_raw_client.py).
+The decided architecture of `lsp-tool` and the LSP protocol substrate it rests
+on. For *why* each choice was made, see [research.md](./research.md); for
+*what's next*, see [planning.md](./planning.md). The runnable protocol spike is
+[`lsp_raw_client.py`](./lsp_raw_client.py).
 
 All spec links point at **LSP 3.17**:
 <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/>
 
 ---
+
+## Architecture (decided)
+
+`lsp-tool` is a small **stateless Rust CLI** an LLM agent harness shells out to
+for semantic code operations — today `rename` and `diagnostics`, JSON on stdout.
+The settled shape:
+
+- **Semantic verbs, not raw LSP.** Callers give a symbol/position and an intent;
+  the tool resolves it to LSP coordinates, drives the server, and applies the
+  edit. The LLM never sees a `{line, character}`.
+- **Division of labor.** The caller (LLM) decides *what* to change and *to what*;
+  the LSP decides *where* every reference is; the tool *applies* the resulting
+  `WorkspaceEdit`. The LLM never synthesizes an edit list.
+- **One server per language, as a subprocess.** The tool spawns the language
+  server and speaks LSP over stdio — the language-agnostic seam (ty is Rust,
+  gopls is Go; the client doesn't care). Servers are bring-your-own on a known
+  path; the tool fails fast with an install hint if one is missing.
+- **Stateless lifecycle.** Born → handshake → one operation → die. No daemon and
+  no buffer sync (each call `didOpen`s disk-truth). A warm daemon is a future
+  escalation if cold-start ever dominates.
+- **Apply pipeline.** Offsets are converted from the server's negotiated
+  `positionEncoding` (utf-16 for ty); edits apply **bottom-to-top**
+  ([§5](#5-positions-and-the-utf-16-gotcha), [§7](#7-the-rename-workflow-the-headline));
+  both `changes` and `documentChanges` encodings are handled, resource ops included.
+- **Single-repo scope.** Only what's statically resolvable in the workspace;
+  dynamic/string refs and cross-repo consumers are out of scope.
+- **Harness integration.** A thin in-process tool shells out to the CLI;
+  diagnostics ride a `post_edit` hook that aggregates type-checker + linter (the
+  two have different jobs — ship both).
+
+**Implementation:** Rust, in [`lsp-tool-rs/`](./lsp-tool-rs/).
+
+**Language servers (bring-your-own).** Pin a version per language for
+reproducibility.
+
+| lang | server | acquire | default command |
+|---|---|---|---|
+| **Python** | **ty** | **`uv sync` → `.venv/bin/ty`** | **`.venv/bin/ty server`** |
+| Go | gopls | `go install golang.org/x/tools/gopls@latest` | `gopls` |
+| Rust | rust-analyzer | `rustup component add rust-analyzer` | `rust-analyzer` |
+| TS | typescript-language-server | `npm i -g typescript-language-server` | `typescript-language-server --stdio` |
+
+The rest of this document is the LSP protocol substrate the above rests on.
 
 ## 1. What problem LSP solves
 
