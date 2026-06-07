@@ -1,35 +1,82 @@
-# lsp-testbed
+# lsp4agents
 
-A scratch project for learning the Language Server Protocol by talking to it
-directly — no editor, no client library, just stdio and JSON. Currently
-points at [ty](https://docs.astral.sh/ty/) (Astral's Rust-based Python type
-checker, which ships with an LSP server).
+Precise, semantic code operations — `rename` and `diagnostics` — for LLM coding
+agents, backed by real Language Server Protocol servers instead of
+`grep`-and-replace.
 
-> **New here?** [`documentation.md`](./documentation.md) is the decided
-> architecture of `lsp-tool` + an LSP protocol reference (diagrams, glossary,
-> spec links); [`research.md`](./research.md) holds the rationale and the
-> Rust-vs-Python comparison; [`planning.md`](./planning.md) is the thin "what's
-> next." This README is about the *script*: how to run it and the session it drives.
+**The premise: LSP is editor-shaped; an agent is intent-shaped.** An editor has a
+cursor, so a code position is free. An agent has only a symbol name and an
+intent. The hard part — turning "rename `getUser`" into precise zero-indexed
+UTF-16 coordinates and a verified, cross-file edit — is exactly what this tool
+does, so the model never has to count columns (and quietly corrupt a string or
+miss a reference).
+
+> **Status: early, active research.** A working v0 (`lsp-tool`, a stateless Rust
+> CLI) does `rename` + `diagnostics` against [ty](https://docs.astral.sh/ty/) for
+> Python; Go, Rust, and TypeScript are the next targets. Built for the
+> [Tilth](https://github.com/AlteredCraft/tilth) agent harness, but usable by any
+> tool that can shell out.
+
+## How we got here
+
+It began as a *raw* LSP testbed — [`lsp_raw_client.py`](./lsp_raw_client.py), a
+from-scratch client that speaks JSON-RPC over stdio and prints every frame, to
+learn the protocol on the wire rather than through a library. That surfaced the
+design (semantic verbs over a transparent proxy; the UTF-16 and apply-order
+traps) and a build-vs-reuse question — settled in Rust's favor by a
+Rust-vs-Python bake-off. Three docs carry the thinking:
+
+- **[documentation.md](./documentation.md)** — the decided architecture plus an
+  LSP protocol reference (diagrams, glossary, spec links).
+- **[research.md](./research.md)** — the rationale, and the Rust-vs-Python
+  comparison (behavior, lines-of-code-to-maintain, latency).
+- **[planning.md](./planning.md)** — thin and forward-looking: what's next.
 
 ## Setup
 
 ```bash
-uv sync
+uv sync   # installs ty into .venv/bin/ty, plus dev tools (pytest, ruff)
+```
+
+## The tool: `lsp-tool`
+
+A stateless Rust CLI ([`lsp-tool-rs/`](./lsp-tool-rs/)) the harness shells out to
+for `rename` and `diagnostics`, JSON on stdout. It spawns a language server as a
+subprocess and speaks LSP over stdio — the language-agnostic seam (ty is Rust,
+gopls is Go; the client doesn't care). For Python it drives ty directly
+(`.venv/bin/ty`, no Python in the loop). An earlier Python-on-multilspy trial
+lives in [`lsp-tool-py/`](./lsp-tool-py/), kept for the comparison that chose the
+language — see [`research.md`](./research.md).
+
+Run from the repo root (`--workspace` defaults to `.`):
+
+```bash
+# Rust — the implementation. First `cargo run` compiles, then it's instant.
+cargo run --manifest-path lsp-tool-rs/Cargo.toml -- diagnostics sample.py
+cargo run --manifest-path lsp-tool-rs/Cargo.toml -- rename sample.py 5 10 salutation
+
+# Python — early trial, kept for the comparison.
+uv run python lsp-tool-py/lsp_tool.py diagnostics sample.py
+```
+
+`rename` takes `<file> <line> <character> <new-name>` (0-indexed). Without
+`--apply` it prints the `WorkspaceEdit`; add `--apply` to edit the files in place
+(restore with `git checkout sample.py consumer.py`).
+
+## The testbed: LSP on the wire
+
+```bash
 uv run python lsp_raw_client.py   # drive a session, print every frame
 uv run pytest                     # test the WorkspaceEdit apply logic
 ```
 
-You'll get a long stream of `→ SEND` and `← RECV` blocks on stdout — those
-are the actual JSON-RPC frames going to and from `ty server`. ty's own
-log output appears on stderr, prefixed with `[ty stderr]`. The run ends with
-`✎ APPLIED` blocks showing the files after the rename is applied (then
-restored, so the run is repeatable).
-
-## What `lsp_raw_client.py` does
-
-The script is a from-scratch LSP client that drives `ty server` through a
-minimal but realistic session and prints every wire-level message. The
-intent is to make the protocol legible — not to be a useful client.
+You get a stream of `→ SEND` and `← RECV` blocks — the actual JSON-RPC frames to
+and from `ty server` (ty's own logs go to stderr, prefixed `[ty stderr]`). The
+run ends with `✎ APPLIED` blocks showing the files after a rename is applied,
+then restores the originals so it stays repeatable. The script is a from-scratch
+LSP client — framing, lifecycle, and message shapes in one ~450-line file you can
+read top to bottom — built to make the protocol legible, not to be a useful
+client. It's where the tool's design came from.
 
 ### Why "raw"?
 
@@ -158,32 +205,6 @@ Good next experiments against the same files:
   update — the core loop of an interactive client. This pairs naturally
   with `apply_text_edits` to keep the server's view and disk in sync.
 
-## Beyond the testbed: the `lsp-tool` CLI
-
-The script is a teaching artifact. The real tool — architecture in
-[`documentation.md`](./documentation.md), plan in [`planning.md`](./planning.md)
-— is a stateless CLI an agent harness shells out to for `rename` and
-`diagnostics`. **It's being built in Rust** under [`lsp-tool-rs/`](./lsp-tool-rs/),
-driving ty directly (the v0 spawns the uv-managed `.venv/bin/ty` binary — no
-Python in the loop). An earlier Python-on-multilspy trial lives in
-[`lsp-tool-py/`](./lsp-tool-py/), kept for the comparison that decided the
-language — see [`research.md`](./research.md).
-
-Run from the repo root (`--workspace` defaults to `.`):
-
-```bash
-# Rust — the implementation. First `cargo run` compiles, then it's instant.
-cargo run --manifest-path lsp-tool-rs/Cargo.toml -- diagnostics sample.py
-cargo run --manifest-path lsp-tool-rs/Cargo.toml -- rename sample.py 5 10 salutation
-
-# Python — early trial, kept for the comparison.
-uv run python lsp-tool-py/lsp_tool.py diagnostics sample.py
-```
-
-`rename` takes `<file> <line> <character> <new-name>` (0-indexed). Without
-`--apply` it prints the `WorkspaceEdit`; add `--apply` to edit the files in place
-(restore with `git checkout sample.py consumer.py`).
-
 ## Files
 
 - `documentation.md` — the decided architecture of `lsp-tool` plus an LSP
@@ -192,7 +213,11 @@ uv run python lsp-tool-py/lsp_tool.py diagnostics sample.py
 - `research.md` — the rationale behind the design, and the Rust-vs-Python v0
   comparison (behavior, lines-of-code-to-maintain, latency).
 - `planning.md` — thin and forward-looking: current reality and next steps.
-- `lsp_raw_client.py` — the client described above.
+- `lsp-tool-rs/` — **the tool**, in Rust: hand-rolled framing, a ty-driven
+  `rename`/`diagnostics` CLI, and a UTF-16-aware applier. Build/run with `cargo`.
+- `lsp-tool-py/` — an early Python-on-multilspy trial, superseded by the Rust
+  implementation; kept for `research.md`.
+- `lsp_raw_client.py` — the raw testbed client described above.
 - `sample.py` — small program defining `greet`, with a deliberate type
   error (`greet(123)` where `greet` expects `str`) plus two decoy uses of
   the word "greet" (a comment and an f-string) that rename must ignore.
@@ -200,10 +225,6 @@ uv run python lsp-tool-py/lsp_tool.py diagnostics sample.py
   rename produces edits in two files (the cross-file case).
 - `test_apply.py` — tests for the WorkspaceEdit apply logic (UTF-16 offset
   conversion, bottom-to-top application, both edit encodings). `uv run pytest`.
-- `lsp-tool-rs/` — **the tool**, in Rust: hand-rolled framing, a ty-driven
-  `rename`/`diagnostics` CLI, and a UTF-16-aware applier. Build/run with `cargo`.
-- `lsp-tool-py/` — an early Python-on-multilspy trial, superseded by the Rust
-  implementation; kept for `research.md`.
 - `pyproject.toml` / `uv.lock` — pin `ty` (protocol output), `multilspy` (the
   Python v0), and dev tools (`pytest`, `ruff`). The lockfile keeps runs reproducible.
 
