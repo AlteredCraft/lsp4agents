@@ -74,6 +74,60 @@ candidate with its line text so the caller can pick one. How resolution works
 `--apply`, `rename` prints the `WorkspaceEdit`; add `--apply` to edit the files
 in place (restore with `git checkout sample.py consumer.py`).
 
+## FAQ
+
+**Is a bare symbol name specific enough? What if a function and a variable
+share the name `greet`?**
+Then the tool refuses to guess: exit 1 with a structured error whose
+`error.data.candidates` lists every verified occurrence with its line number
+and source text, plus a hint to re-run with `line:char`. The design property
+is that the failure mode is never "renamed the wrong thing" — the
+reference-set check can't merge two distinct symbols (a position inside a
+reference range of symbol A *is* a reference to A), so an imperfect server can
+only cause a *false ambiguity*, which fails safe. For an agent the loop is:
+try the name; on ambiguity, read the candidates (judgment — its strength) and
+re-run with coordinates the tool supplied, not ones it counted.
+
+**Does rename work across files? Do I have to point at the definition?**
+Workspace-wide, and no. The `<file>` argument only anchors *which symbol you
+mean*; the server indexes the whole `--workspace` and resolves the import
+graph, so once the symbol is pinned, `rename`/`references` cover every file in
+the repo. Naming a *caller's* file is identical to naming the definition's —
+one rename edits the `def`, the `from lib import greet` lines, and
+attribute-style `lib.greet(...)` calls alike.
+
+**What can't it see?**
+Anything not statically resolvable in the workspace: dynamic references
+(`getattr`, string keys) and consumers in *other* repos
+([documentation.md §8](./documentation.md#8-why-lsp-rename-beats-grep--and-its-blind-spot)).
+Planned mitigation: after a rename, grep the old name and surface the residue
+as "review these" ([planning.md](./planning.md)).
+
+**Why not just grep?**
+Grep over-matches (strings, comments, unrelated same-named symbols); LSP
+under-matches (the dynamic refs above). Rename wants precision, so LSP leads
+and grep is the planned recall backstop — the precision/recall table is in
+[documentation.md §8](./documentation.md#8-why-lsp-rename-beats-grep--and-its-blind-spot).
+
+**Why a CLI instead of an MCP server, like Serena?**
+For one harness talking to one backend, a CLI is less plumbing and more
+agent-legible; the prior-art comparison (Serena, cclsp, mcp-language-server)
+and the honest costs are in [research.md](./research.md) § "A CLI, not MCP
+(yet)".
+
+**Doesn't `ty check` already do diagnostics?**
+Yes — batch CLIs cover the stateless case, which is why diagnostics is the
+*weak* half of the pitch ([research.md](./research.md) § "Which verbs actually
+pay"). It stays because it's one interface and nearly free; `rename` and
+`references` are the verbs nothing in an agent's stock toolkit replaces.
+
+**Doesn't booting a fresh server every call get slow?**
+Server cold-start dominates and ty's is ~0.1s, fine for small-to-mid repos
+(measurements in [research.md](./research.md)). For gopls/rust-analyzer-class
+servers on real repos the planned self-daemonizing mode — same CLI interface —
+is the answer ([planning.md](./planning.md)). Correctness never degrades with
+repo size; only latency does.
+
 ## The testbed: LSP on the wire
 
 ```bash

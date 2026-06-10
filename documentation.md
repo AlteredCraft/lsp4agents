@@ -38,8 +38,11 @@ JSON on stdout. The settled shape:
   `positionEncoding` (utf-16 for ty); edits apply **bottom-to-top**
   ([§5](#5-positions-and-the-utf-16-gotcha), [§7](#7-the-rename-workflow-the-headline));
   both `changes` and `documentChanges` encodings are handled, resource ops included.
-- **Single-repo scope.** Only what's statically resolvable in the workspace;
-  dynamic/string refs and cross-repo consumers are out of scope.
+- **Single-repo scope, workspace-wide reach.** Only what's statically
+  resolvable in the workspace; dynamic/string refs and cross-repo consumers are
+  out of scope. Within it, every operation is workspace-wide: the `<file>`
+  argument only anchors *which symbol is meant* — renaming from a caller's
+  file is identical to renaming from the definition's.
 - **Agent-shaped failure.** Every wait on the server carries a `--timeout`
   (default 30s), and all failures — wedged server, unknown symbol, ambiguity —
   come back as `{"error": {"message", "data"?}}` on stdout with exit 1. An
