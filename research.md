@@ -45,7 +45,22 @@ Tilth is adding out-of-process tools and prefers a simple CLI. MCP is essentiall
 "a persistent daemon + a standardized transport"; for one harness talking to one
 backend, hosting an MCP server plus writing an MCP client is more plumbing than a
 CLI (or a self-daemonizing CLI). MCP earns its weight when persistence must be
-shared across many tools/clients.
+shared across many tools/clients. A CLI is also the more agent-legible shape:
+models are heavily trained on shelling out, and JSON-on-stdout composes with
+any harness that has a bash tool.
+
+**Prior art (the "why not Serena?" question).** This space has incumbents, and
+they're MCP-shaped: **Serena** (MCP server over solidlsp, the most adopted),
+**cclsp**, **mcp-language-server**. They validate the premise — agents plus
+LSP is a real category — and they chose MCP partly because a persistent server
+solves the warm-index problem for free. Why build anyway: (a) Tilth wants a
+CLI, and none of the incumbents offer one; (b) they inherit the multilspy/
+solidlsp lineage's server lock-in, which the bake-off below showed costs real
+results (jedi missing the type error ty catches); (c) a single static binary
+with no Python runtime is a different deployment point. The honest flip side:
+when this project reaches the daemon stage, it will have rebuilt a chunk of
+what MCP gives for free — that's the price of the CLI interface, paid
+knowingly. Revisit if Tilth grows MCP support.
 
 ### Stateless first
 A fresh-process-per-call CLI is the most stateful-server-behind-a-stateless-shell
@@ -64,6 +79,38 @@ dominated by re-indexing (expected for rust-analyzer/gopls on real repos), add a
 self-daemonizing mode *without changing the CLI interface* — first call starts a
 per-worktree background server on a unix socket; later calls are thin clients;
 the daemon dies at session/worktree teardown. Precedent: **gopls `-remote=auto`**.
+
+**Where the stateless sweet spot ends — an honest mismatch.** Frontier models
+with grep + edit are *good enough* on small repos, which is exactly where
+stateless LSP is cheap. Where agents actually fall apart — large repos,
+cross-file refactors — is where stateless is expensive (rust-analyzer/gopls
+cold-start is seconds to minutes per call). So the stateless sweet spot and the
+*value* sweet spot don't fully overlap, and for big-repo languages the daemon
+is closer to a prerequisite than an escalation. The stateless v0 is still the
+right first move (it proves the verbs and the apply path with zero lifecycle
+machinery), but the daemon is on the critical path to the tool mattering, not
+a contingency.
+
+### Which verbs actually pay (diagnostics is the weak half)
+Calibrating the verbs against what agents can't already do:
+
+- **`rename` is the headline.** Wide mechanical renames are among the most
+  reliable ways agents corrupt code — miss references, edit look-alikes,
+  lose patience on file 7 of 12. One deterministic call replaces an
+  error-prone N-step edit loop. Nothing in an agent's stock toolkit
+  substitutes.
+- **`references` is arguably worth more than rename** and cheaper to serve:
+  it's both impact analysis *before* an edit and a precise, token-cheap
+  answer to "who calls this?" that grep fan-out gets wrong (same-named
+  symbols) and pays for in context.
+- **`diagnostics` is the soft spot.** Most type checkers ship batch CLIs —
+  `ty check`, `tsc --noEmit`, `gopls check`, `rust-analyzer diagnostics` — so
+  an agent (or a post-edit hook) gets the same answer with `subprocess.run`
+  and zero protocol plumbing. In the stateless v0, `lsp-tool diagnostics` is
+  a more elaborate `ty check`. The LSP route earns its keep only once a warm
+  daemon makes it *incremental* — another reason the daemon is on the
+  critical path. The verb stays (one interface, and it's nearly free once
+  the client exists), but it's not the pitch.
 
 ### Bring-your-own servers
 The tool doesn't bundle servers (bundling N servers × M platforms is a release
@@ -172,3 +219,39 @@ only pushes diagnostics). The process boundary is fully decoupled; the protocol
 interactions are not — true multi-server support needs **capability negotiation**
 (read the server's advertised capabilities from `initialize` and branch). That's
 the first item in [planning.md](./planning.md)'s next steps.
+
+## Finding: the v0 interface leaked positions (fixed)
+
+The first v0 betrayed its own thesis. The docs said "the LLM never sees a
+`{line, character}`" — but the CLI was `rename <file> <line> <character>
+<new-name>`, zero-indexed UTF-16 columns and all. It handed the model exactly
+the arithmetic the framing calls the weakest link; the impedance transformer
+was a pass-through. Worth recording because it's an easy failure mode: the
+protocol's shape quietly becomes the tool's shape, one plumbing layer at a
+time.
+
+The fix is the **symbol-resolution layer**: the target argument is now a
+symbol name, resolved in three stages, each leaning on the server for the
+semantic judgment so the lexical part only *proposes*:
+
+1. **Lexical scan** — word-boundary occurrences of the identifier in the file,
+   with UTF-16 columns computed by the tool (over-matches strings/comments by
+   design);
+2. **`prepareRename` verification** — each candidate is asked "renameable
+   here?"; strings, comments, and keywords return null and drop out (the
+   sample.py decoys die here);
+3. **`references` dedupe** — if several candidates survive, occurrences of the
+   *same* symbol are exactly its reference set, so pull references from the
+   first and check the rest are covered. Anything uncovered is a genuinely
+   different symbol (shadowing) → a structured `error.data` listing every
+   candidate with its line text, and the `line:char` escape hatch (which the
+   CLI still accepts as a target — `5:10` can't be an identifier) for the
+   caller to disambiguate.
+
+Verified against ty: `rename sample.py greet salutation` resolves through the
+comment/string decoys to 4 edits in 2 files; two same-named locals in
+different scopes correctly come back ambiguous; `rename shadow.py 1:4 total`
+then renames just the one scope. An alternative considered: `documentSymbol`/
+`workspace/symbol` lookup — rejected for v0 because symbol-listing coverage
+varies across servers, while `prepareRename` + `references` are the same
+methods the verbs already need.

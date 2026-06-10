@@ -1,19 +1,23 @@
 # lsp4agents
 
-Precise, semantic code operations — `rename` and `diagnostics` — for LLM coding
-agents, backed by real Language Server Protocol servers instead of
-`grep`-and-replace.
+Precise, semantic code operations — `rename`, `references`, and `diagnostics` —
+for LLM coding agents, backed by real Language Server Protocol servers instead
+of `grep`-and-replace.
 
 **The premise: LSP is editor-shaped; an agent is intent-shaped.** An editor has a
 cursor, so a code position is free. An agent has only a symbol name and an
 intent. The hard part — turning "rename `getUser`" into precise zero-indexed
 UTF-16 coordinates and a verified, cross-file edit — is exactly what this tool
 does, so the model never has to count columns (and quietly corrupt a string or
-miss a reference).
+miss a reference). You say `rename sample.py greet salutation`; the tool finds
+the symbol, verifies it with the server, and answers in JSON — including a
+structured "ambiguous, here are the candidates" error when two scopes share
+the name.
 
 > **Status: early, active research.** A working v0 (`lsp-tool`, a stateless Rust
-> CLI) does `rename` + `diagnostics` against [ty](https://docs.astral.sh/ty/) for
-> Python; Go, Rust, and TypeScript are the next targets. Built for the
+> CLI) does `rename` + `references` + `diagnostics` against
+> [ty](https://docs.astral.sh/ty/) for Python; Go, Rust, and TypeScript are the
+> next targets. Built for the
 > [Tilth](https://github.com/AlteredCraft/tilth) agent harness, but usable by any
 > tool that can shell out.
 
@@ -41,7 +45,8 @@ uv sync   # installs ty into .venv/bin/ty, plus dev tools (pytest, ruff)
 ## The tool: `lsp-tool`
 
 A stateless Rust CLI ([`lsp-tool-rs/`](./lsp-tool-rs/)) the harness shells out to
-for `rename` and `diagnostics`, JSON on stdout. It spawns a language server as a
+for `rename`, `references`, and `diagnostics`, JSON on stdout (errors too:
+`{"error": {...}}`, exit 1). It spawns a language server as a
 subprocess and speaks LSP over stdio — the language-agnostic seam (ty is Rust,
 gopls is Go; the client doesn't care). For Python it drives ty directly
 (`.venv/bin/ty`, no Python in the loop). An earlier Python-on-multilspy trial
@@ -53,15 +58,75 @@ Run from the repo root (`--workspace` defaults to `.`):
 ```bash
 # Rust — the implementation. First `cargo run` compiles, then it's instant.
 cargo run --manifest-path lsp-tool-rs/Cargo.toml -- diagnostics sample.py
-cargo run --manifest-path lsp-tool-rs/Cargo.toml -- rename sample.py 5 10 salutation
+cargo run --manifest-path lsp-tool-rs/Cargo.toml -- rename sample.py greet salutation
+cargo run --manifest-path lsp-tool-rs/Cargo.toml -- references sample.py greet
 
 # Python — early trial, kept for the comparison.
 uv run python lsp-tool-py/lsp_tool.py diagnostics sample.py
 ```
 
-`rename` takes `<file> <line> <character> <new-name>` (0-indexed). Without
-`--apply` it prints the `WorkspaceEdit`; add `--apply` to edit the files in place
-(restore with `git checkout sample.py consumer.py`).
+`rename` and `references` take a **target**: a symbol name (`greet`), or an
+explicit `line:character` position (zero-indexed, UTF-16 column — `5:10`) as
+the escape hatch when a name is ambiguous; the ambiguity error lists every
+candidate with its line text so the caller can pick one. How resolution works
+(lexical scan → `prepareRename` verify → `references` dedupe) is in
+[research.md](./research.md) § "the v0 interface leaked positions". Without
+`--apply`, `rename` prints the `WorkspaceEdit`; add `--apply` to edit the files
+in place (restore with `git checkout sample.py consumer.py`).
+
+## FAQ
+
+**Is a bare symbol name specific enough? What if a function and a variable
+share the name `greet`?**
+Then the tool refuses to guess: exit 1 with a structured error whose
+`error.data.candidates` lists every verified occurrence with its line number
+and source text, plus a hint to re-run with `line:char`. The design property
+is that the failure mode is never "renamed the wrong thing" — the
+reference-set check can't merge two distinct symbols (a position inside a
+reference range of symbol A *is* a reference to A), so an imperfect server can
+only cause a *false ambiguity*, which fails safe. For an agent the loop is:
+try the name; on ambiguity, read the candidates (judgment — its strength) and
+re-run with coordinates the tool supplied, not ones it counted.
+
+**Does rename work across files? Do I have to point at the definition?**
+Workspace-wide, and no. The `<file>` argument only anchors *which symbol you
+mean*; the server indexes the whole `--workspace` and resolves the import
+graph, so once the symbol is pinned, `rename`/`references` cover every file in
+the repo. Naming a *caller's* file is identical to naming the definition's —
+one rename edits the `def`, the `from lib import greet` lines, and
+attribute-style `lib.greet(...)` calls alike.
+
+**What can't it see?**
+Anything not statically resolvable in the workspace: dynamic references
+(`getattr`, string keys) and consumers in *other* repos
+([documentation.md §8](./documentation.md#8-why-lsp-rename-beats-grep--and-its-blind-spot)).
+Planned mitigation: after a rename, grep the old name and surface the residue
+as "review these" ([planning.md](./planning.md)).
+
+**Why not just grep?**
+Grep over-matches (strings, comments, unrelated same-named symbols); LSP
+under-matches (the dynamic refs above). Rename wants precision, so LSP leads
+and grep is the planned recall backstop — the precision/recall table is in
+[documentation.md §8](./documentation.md#8-why-lsp-rename-beats-grep--and-its-blind-spot).
+
+**Why a CLI instead of an MCP server, like Serena?**
+For one harness talking to one backend, a CLI is less plumbing and more
+agent-legible; the prior-art comparison (Serena, cclsp, mcp-language-server)
+and the honest costs are in [research.md](./research.md) § "A CLI, not MCP
+(yet)".
+
+**Doesn't `ty check` already do diagnostics?**
+Yes — batch CLIs cover the stateless case, which is why diagnostics is the
+*weak* half of the pitch ([research.md](./research.md) § "Which verbs actually
+pay"). It stays because it's one interface and nearly free; `rename` and
+`references` are the verbs nothing in an agent's stock toolkit replaces.
+
+**Doesn't booting a fresh server every call get slow?**
+Server cold-start dominates and ty's is ~0.1s, fine for small-to-mid repos
+(measurements in [research.md](./research.md)). For gopls/rust-analyzer-class
+servers on real repos the planned self-daemonizing mode — same CLI interface —
+is the answer ([planning.md](./planning.md)). Correctness never degrades with
+repo size; only latency does.
 
 ## The testbed: LSP on the wire
 
@@ -213,8 +278,10 @@ Good next experiments against the same files:
 - `research.md` — the rationale behind the design, and the Rust-vs-Python v0
   comparison (behavior, lines-of-code-to-maintain, latency).
 - `planning.md` — thin and forward-looking: current reality and next steps.
-- `lsp-tool-rs/` — **the tool**, in Rust: hand-rolled framing, a ty-driven
-  `rename`/`diagnostics` CLI, and a UTF-16-aware applier. Build/run with `cargo`.
+- `lsp-tool-rs/` — **the tool**, in Rust: hand-rolled framing, symbol→position
+  resolution, a ty-driven `rename`/`references`/`diagnostics` CLI, and a
+  UTF-16-aware applier. Build/run with `cargo`; `cargo test` covers the
+  resolution scanner and URI handling.
 - `lsp-tool-py/` — an early Python-on-multilspy trial, superseded by the Rust
   implementation; kept for `research.md`.
 - `lsp_raw_client.py` — the raw testbed client described above.

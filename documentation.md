@@ -13,12 +13,17 @@ All spec links point at **LSP 3.17**:
 ## Architecture (decided)
 
 `lsp-tool` is a small **stateless Rust CLI** an LLM agent harness shells out to
-for semantic code operations — today `rename` and `diagnostics`, JSON on stdout.
-The settled shape:
+for semantic code operations — today `rename`, `references`, and `diagnostics`,
+JSON on stdout. The settled shape:
 
-- **Semantic verbs, not raw LSP.** Callers give a symbol/position and an intent;
-  the tool resolves it to LSP coordinates, drives the server, and applies the
-  edit. The LLM never sees a `{line, character}`.
+- **Semantic verbs, not raw LSP.** Callers give a symbol name and an intent —
+  `rename sample.py greet salutation` — and the tool resolves the name to LSP
+  coordinates (lexical scan → `prepareRename` verification → `references`
+  dedupe; see [research.md](./research.md) § "the v0 interface leaked
+  positions"), drives the server, and applies the edit. The LLM never counts a
+  column. Ambiguity (same name, different scopes) is a structured error
+  listing each candidate, with an explicit `line:char` target as the escape
+  hatch.
 - **Division of labor.** The caller (LLM) decides *what* to change and *to what*;
   the LSP decides *where* every reference is; the tool *applies* the resulting
   `WorkspaceEdit`. The LLM never synthesizes an edit list.
@@ -33,8 +38,15 @@ The settled shape:
   `positionEncoding` (utf-16 for ty); edits apply **bottom-to-top**
   ([§5](#5-positions-and-the-utf-16-gotcha), [§7](#7-the-rename-workflow-the-headline));
   both `changes` and `documentChanges` encodings are handled, resource ops included.
-- **Single-repo scope.** Only what's statically resolvable in the workspace;
-  dynamic/string refs and cross-repo consumers are out of scope.
+- **Single-repo scope, workspace-wide reach.** Only what's statically
+  resolvable in the workspace; dynamic/string refs and cross-repo consumers are
+  out of scope. Within it, every operation is workspace-wide: the `<file>`
+  argument only anchors *which symbol is meant* — renaming from a caller's
+  file is identical to renaming from the definition's.
+- **Agent-shaped failure.** Every wait on the server carries a `--timeout`
+  (default 30s), and all failures — wedged server, unknown symbol, ambiguity —
+  come back as `{"error": {"message", "data"?}}` on stdout with exit 1. An
+  agent never parses a panic off stderr or hangs on a dead subprocess.
 - **Harness integration.** A thin in-process tool shells out to the CLI;
   diagnostics ride a `post_edit` hook that aggregates type-checker + linter (the
   two have different jobs — ship both).

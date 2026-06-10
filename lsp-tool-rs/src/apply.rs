@@ -97,24 +97,26 @@ fn apply_text_edits(text: &str, edits: &[TextEdit]) -> String {
     out
 }
 
-/// Turn a `file://` URI into a local path (decoding %XX escapes).
-fn uri_to_path(uri: &str) -> PathBuf {
+/// Turn a `file://` URI into a local path. %XX escapes decode to *bytes* and
+/// the result is parsed as UTF-8 — pushing each byte as a `char` would mangle
+/// multi-byte sequences (e.g. `%C3%A9` → `Ã©` instead of `é`).
+pub fn uri_to_path(uri: &str) -> PathBuf {
     let raw = uri.strip_prefix("file://").unwrap_or(uri);
-    let mut decoded = String::with_capacity(raw.len());
+    let mut decoded: Vec<u8> = Vec::with_capacity(raw.len());
     let bytes = raw.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
             if let Ok(b) = u8::from_str_radix(&raw[i + 1..i + 3], 16) {
-                decoded.push(b as char);
+                decoded.push(b);
                 i += 3;
                 continue;
             }
         }
-        decoded.push(bytes[i] as char);
+        decoded.push(bytes[i]);
         i += 1;
     }
-    PathBuf::from(decoded)
+    PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
 }
 
 /// Flatten a WorkspaceEdit to `{uri: [TextEdit]}`, from either encoding.
