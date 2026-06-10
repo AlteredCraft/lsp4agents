@@ -2,7 +2,7 @@
 name = "lsp-tool"
 version = "0.1.0"
 edition = "2021"
-description = "Hand-rolled LSP-backed rename/diagnostics CLI (v0, drives ty)"
+description = "Hand-rolled LSP-backed rename/references/diagnostics CLI (v0, drives ty)"
 
 [[bin]]
 name = "lsp-tool"

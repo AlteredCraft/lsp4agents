@@ -8,25 +8,45 @@ are in [research.md](./research.md). This file is just *current reality* + *next
 
 A working v0 of `lsp-tool` exists in [`lsp-tool-rs/`](./lsp-tool-rs/):
 
-- **Rust CLI**, shelled out to by the harness — `rename` + `diagnostics`, JSON out.
-- **Stateless** (born → handshake → one op → die); debug perf metrics still to add.
-- **One language live: Python via ty**, spawned directly from `.venv/bin/ty`.
+- **Rust CLI**, shelled out to by the harness — `rename`, `references`,
+  `diagnostics`, JSON out (errors too: `{"error": {...}}`, exit 1).
+- **Symbol targets.** `rename sample.py greet salutation` — the tool resolves
+  the name to protocol coordinates (lexical scan → `prepareRename` verify →
+  `references` dedupe; see research.md § "the v0 leaked positions"). Explicit
+  `line:char` remains as the disambiguation escape hatch, and ambiguity is a
+  structured error listing the candidates.
+- **Stateless** (born → handshake → one op → die), with a per-response
+  `--timeout` so a wedged server fails fast; debug perf metrics still to add.
+- **One language live: Python via ty**, spawned directly from `.venv/bin/ty`;
+  `languageId` is derived from the file extension, not hardcoded.
 - Reuses the testbed's UTF-16-aware, bottom-to-top `WorkspaceEdit` applier.
 
 Settled decisions (architecture in [documentation.md](./documentation.md), the
-why in [research.md](./research.md)): semantic verbs over a raw proxy;
+why in [research.md](./research.md)): semantic verbs over a raw proxy — now
+including the symbol-resolution layer that makes them real;
 LLM-decides-*what* / LSP-decides-*where* / tool-applies; single-repo scope; Rust,
 hand-rolled; CLI over MCP; stateless-first; bring-your-own servers.
 
 ## Next steps [open]
 
-1. **Capability negotiation.** The v0 hardcodes ty's shape (pull diagnostics,
-   `prepareRename`, utf-16, `languageId: python`); pointing `--server-cmd` at jedi
-   already broke on `Method Not Found: textDocument/diagnostic`. Branch on the
-   server's advertised capabilities instead. (See [research.md](./research.md) §
-   "spawn-decoupled, but protocol-coupled".)
-2. **Second language: gopls.** The first real test of the multi-language backend,
-   the per-language acquire path, and the indexing readiness-wait.
+Ordered by agent value, not protocol completeness:
+
+1. **Capability negotiation.** The v0 still hardcodes most of ty's shape (pull
+   diagnostics with push fallback, `prepareRename`); pointing `--server-cmd` at
+   jedi broke on `Method Not Found: textDocument/diagnostic`. Branch on the
+   server's advertised capabilities (started: `referencesProvider` and
+   `positionEncoding` are checked; the rest isn't). (See
+   [research.md](./research.md) § "spawn-decoupled, but protocol-coupled".)
+2. **Second language: gopls.** The first real test of the multi-language
+   backend, the per-language acquire path, and the indexing readiness-wait.
+   Note: for gopls/rust-analyzer-class servers the warm daemon (below) is
+   closer to a prerequisite than an optimization — see research.md § "where
+   the stateless sweet spot ends".
 3. **Debug perf instrumentation.** Per-call timing breakdown (spawn → initialize
    → index-ready → op → total) behind a debug flag, kept out of the JSON result —
-   so the eventual stateless→stateful trigger is data-driven, not a guess.
+   so the stateless→stateful trigger is data-driven, not a guess.
+4. **Self-daemonizing mode** for slow-indexing servers, same CLI interface
+   (gopls `-remote=auto` precedent). Sequenced after (3) so it lands with
+   evidence, but expected to be required for gopls/rust-analyzer on real repos.
+5. **Hybrid rename residue.** After `--apply`, grep the *old* name and surface
+   leftovers as "review these" — LSP precision plus grep recall.
