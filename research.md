@@ -41,7 +41,9 @@ the residue as "review these" — LSP precision plus grep recall, with the
 LLM/human adjudicating the tail.
 
 ### A CLI, not MCP (yet)
-Tilth is adding out-of-process tools and prefers a simple CLI. MCP is essentially
+The consumer shape this research targets is an agent harness shelling out to a
+subprocess; Tilth — a candidate future integration, not a schedule driver — is
+the concrete example, and it prefers a simple CLI. MCP is essentially
 "a persistent daemon + a standardized transport"; for one harness talking to one
 backend, hosting an MCP server plus writing an MCP client is more plumbing than a
 CLI (or a self-daemonizing CLI). MCP earns its weight when persistence must be
@@ -53,19 +55,20 @@ any harness that has a bash tool.
 they're MCP-shaped: **Serena** (MCP server over solidlsp, the most adopted),
 **cclsp**, **mcp-language-server**. They validate the premise — agents plus
 LSP is a real category — and they chose MCP partly because a persistent server
-solves the warm-index problem for free. Why build anyway: (a) Tilth wants a
-CLI, and none of the incumbents offer one; (b) they inherit the multilspy/
+solves the warm-index problem for free. Why build anyway: (a) the target shape
+is a plain CLI, and none of the incumbents offer one; (b) they inherit the multilspy/
 solidlsp lineage's server lock-in, which the bake-off below showed costs real
 results (jedi missing the type error ty catches); (c) a single static binary
 with no Python runtime is a different deployment point. The honest flip side:
 when this project reaches the daemon stage, it will have rebuilt a chunk of
 what MCP gives for free — that's the price of the CLI interface, paid
-knowingly. Revisit if Tilth grows MCP support.
+knowingly. Revisit if a real consumer (Tilth or otherwise) lands on MCP.
 
 ### Stateless first
 A fresh-process-per-call CLI is the most stateful-server-behind-a-stateless-shell
-arrangement possible — but at Tilth's small-project scale the trade is good, and
-statelessness *eliminates* buffer sync rather than solving it.
+arrangement possible — but at the small-repo scale this research targets first,
+the trade is good, and statelessness *eliminates* buffer sync rather than
+solving it.
 
 | | Stateless CLI (boot per call) | Stateful (persistent / daemon) |
 |---|---|---|
