@@ -14,12 +14,13 @@ the symbol, verifies it with the server, and answers in JSON — including a
 structured "ambiguous, here are the candidates" error when two scopes share
 the name.
 
-> **Status: early, active research.** A working v0 (`lsp-tool`, a stateless Rust
-> CLI) does `rename` + `references` + `diagnostics` against
+> **Status: early, active research.** `lsp4agents` is the project's code name;
+> this is a research repo first, not a product. A working v0 (`lsp-tool`, a
+> stateless Rust CLI) does `rename` + `references` + `diagnostics` against
 > [ty](https://docs.astral.sh/ty/) for Python; Go, Rust, and TypeScript are the
-> next targets. Built for the
-> [Tilth](https://github.com/AlteredCraft/tilth) agent harness, but usable by any
-> tool that can shell out.
+> next targets. Usable by any agent harness that can shell out —
+> [Tilth](https://github.com/AlteredCraft/tilth) is a candidate future
+> integration, not a driver: nothing here is sequenced against its schedule.
 
 ## How we got here
 
@@ -281,7 +282,9 @@ Good next experiments against the same files:
 - `lsp-tool-rs/` — **the tool**, in Rust: hand-rolled framing, symbol→position
   resolution, a ty-driven `rename`/`references`/`diagnostics` CLI, and a
   UTF-16-aware applier. Build/run with `cargo`; `cargo test` covers the
-  resolution scanner and URI handling.
+  resolution scanner and URI handling. End-to-end tests of the CLI against
+  fixture workspaces are a documented need, not yet implemented — see
+  [planning.md](./planning.md) § "Engineering needs".
 - `lsp-tool-py/` — an early Python-on-multilspy trial, superseded by the Rust
   implementation; kept for `research.md`.
 - `lsp_raw_client.py` — the raw testbed client described above.
