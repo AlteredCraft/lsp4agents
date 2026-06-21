@@ -67,7 +67,7 @@ pub fn lexical_candidates(text: &str, symbol: &str) -> Vec<Candidate> {
             if line[byte_off..].starts_with(symbol) {
                 let prev_ok = i == 0 || !is_word(chars[i - 1].1);
                 let after = line[byte_off + symbol.len()..].chars().next();
-                let next_ok = after.map_or(true, |c| !is_word(c));
+                let next_ok = after.is_none_or(|c| !is_word(c));
                 if prev_ok && next_ok {
                     out.push(Candidate {
                         line: line_no,
@@ -152,8 +152,8 @@ fn covered(locations: &[Value], uri: &str, c: &Candidate) -> bool {
     locations.iter().any(|loc| {
         loc["uri"].as_str() == Some(uri)
             && loc["range"]["start"]["line"].as_u64() == Some(c.line as u64)
-            && loc["range"]["start"]["character"].as_u64().map_or(false, |s| s as usize <= c.character)
-            && loc["range"]["end"]["character"].as_u64().map_or(false, |e| c.character < e as usize)
+            && loc["range"]["start"]["character"].as_u64().is_some_and(|s| s as usize <= c.character)
+            && loc["range"]["end"]["character"].as_u64().is_some_and(|e| c.character < e as usize)
     })
 }
 

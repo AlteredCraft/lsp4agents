@@ -33,17 +33,19 @@ pub struct Client {
 
 impl Client {
     /// Spawn `server_cmd` (whitespace-split) in `workspace` and run initialize +
-    /// initialized. ty logs to stderr, which we inherit so JSON on stdout stays clean.
-    pub fn start(server_cmd: &str, workspace: &Path, timeout: Duration) -> Result<Client> {
+    /// initialized. The server's stderr is swallowed unless `debug`, so JSON on
+    /// stdout is the only thing the caller has to read.
+    pub fn start(server_cmd: &str, workspace: &Path, timeout: Duration, debug: bool) -> Result<Client> {
         let parts: Vec<&str> = server_cmd.split_whitespace().collect();
         let (cmd, args) = parts.split_first().context("empty --server-cmd")?;
 
+        let stderr = if debug { Stdio::inherit() } else { Stdio::null() };
         let mut child = Command::new(cmd)
             .args(args)
             .current_dir(workspace)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(stderr)
             .spawn()
             .map_err(|e| spawn_error(e, server_cmd, cmd))?;
 
@@ -189,11 +191,7 @@ impl Client {
             return Ok(items);
         }
         // Pull was empty/unsupported — use the pushed set if present.
-        Ok(self
-            .pushed_diagnostics
-            .get(uri)
-            .cloned()
-            .unwrap_or_else(|| items))
+        Ok(self.pushed_diagnostics.get(uri).cloned().unwrap_or(items))
     }
 
     /// textDocument/prepareRename — `Ok(None)` means "not renameable here".
@@ -229,7 +227,7 @@ impl Client {
 
     /// textDocument/references (declaration included). Returns the Location list.
     pub fn references(&mut self, uri: &str, line: usize, character: usize) -> Result<Vec<Value>> {
-        if self.capabilities.get("referencesProvider").map_or(true, Value::is_null) {
+        if self.capabilities.get("referencesProvider").is_none_or(Value::is_null) {
             bail!("server does not advertise referencesProvider");
         }
         let id = self.request(

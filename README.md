@@ -55,8 +55,9 @@ that same install hint.
 ## The tool: `lsp4a`
 
 A stateless Rust CLI ([`lsp4a/`](./lsp4a/)) the harness shells out to
-for `rename`, `references`, and `diagnostics`, JSON on stdout (errors too:
-`{"error": {...}}`, exit 1). It spawns a language server as a subprocess and
+for `rename`, `references`, and `diagnostics`, JSON on stdout — *every* failure
+included, even bad arguments: `{"error": {...}}` on stdout, exit 1 for runtime
+failures and 2 for usage errors (never clap's prose on stderr). It spawns a language server as a subprocess and
 speaks LSP over stdio — the language-agnostic seam (ty is Rust, gopls is Go; the
 client doesn't care). It finds `ty` on your PATH by default; point
 `--server-cmd` at any other server.
@@ -79,11 +80,18 @@ with its line text so the caller can pick one. How resolution works (lexical
 scan → `prepareRename` verify → `references` dedupe) is in
 [research.md](./research.md) § "the v0 interface leaked positions".
 
-`rename` returns a **structured summary** an agent reads directly — `status`
-(`preview`/`applied`), `scope` (`{files, edits}`), and a before/after row per
-changed line — never a raw `WorkspaceEdit`. Add `--apply` to edit the files in
-place (restore with `git checkout sample.py consumer.py`), or `--raw` to also
-get the underlying `WorkspaceEdit` for callers that apply it themselves.
+All three verbs answer in the same agent-legible shape: **1-indexed lines plus
+the source text, never UTF-16 columns or 0-indexed protocol coordinates.**
+`rename` returns a **structured summary** — `status` (`preview`/`applied`),
+`scope` (`{files, edits}`), and a before/after row per changed line; add
+`--apply` to edit the files in place (restore with `git checkout sample.py
+consumer.py`). `references` returns `{file, line, text}` rows; `diagnostics`
+returns severity-as-a-word, the offending line, and related-location context.
+Every verb takes `--raw` to *also* emit the underlying protocol object
+(`WorkspaceEdit` / `Location[]` / LSP diagnostics) for callers that want it.
+
+The language server's own logs are suppressed so the JSON is the only thing on
+the output; pass `--debug` (any position) to surface them when something's off.
 
 ## FAQ
 
@@ -150,8 +158,8 @@ repo size; only latency does.
 - `lsp4a/` — **the tool**, in Rust: hand-rolled framing, symbol→position
   resolution, a ty-driven `rename`/`references`/`diagnostics` CLI, and a
   UTF-16-aware applier. Build/run with `cargo`; `cargo test` covers the
-  resolution scanner, URI handling, and an end-to-end `rename` suite
-  (`tests/rename.rs`) that drives the built binary against fixture workspaces.
+  resolution scanner, URI handling, and an end-to-end CLI suite
+  (`tests/cli.rs`) that drives the built binary against fixture workspaces.
 - `sample.py` — small program defining `greet`, with a deliberate type
   error (`greet(123)` where `greet` expects `str`) plus two decoy uses of
   the word "greet" (a comment and an f-string) that rename must ignore.

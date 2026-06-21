@@ -1,15 +1,17 @@
-//! End-to-end tests for the `rename` JSON contract.
+//! End-to-end tests for the `lsp4a` CLI contract — `rename`, `references`, and
+//! `diagnostics`.
 //!
-//! These run the *built* `lsp4a` binary against throwaway fixture workspaces and
-//! drive a real `ty` — they assert the agent-facing contract (the structured
-//! presentation, decoy filtering, the on-disk effect of `--apply`, and the
-//! structured error envelopes), which unit tests on the pure helpers can't reach.
-//! This is the integration suite planning.md flags as a prerequisite before the
-//! invasive protocol work (capability negotiation, a second server).
+//! These run the *built* binary against throwaway fixture workspaces and drive a
+//! real `ty` — they assert the agent-facing contract (the structured rename
+//! presentation, decoy filtering, the on-disk effect of `--apply`, the
+//! structured error envelopes, and that `references`/`diagnostics` speak in
+//! 1-indexed lines + source text, never UTF-16 columns), which unit tests on the
+//! pure helpers can't reach. This is the integration suite planning.md flags as a
+//! prerequisite before the invasive protocol work (capability negotiation, a
+//! second server).
 //!
-//! `ty` is the uv-managed binary at the repo root (`../.venv/bin/ty`); if it's
-//! absent the tests skip rather than fail, so a checkout without `uv sync` is
-//! still green.
+//! `ty` must be on PATH (the BYO model); if it's absent the tests skip rather
+//! than fail, so a checkout without ty installed is still green.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -210,4 +212,125 @@ fn unknown_symbol_is_a_structured_error() {
     let (ok, json) = run(&ws, &ty, &["rename", "shadow.py", "nope", "sum"]);
     assert!(!ok, "unknown symbol must exit non-zero, got {json}");
     assert!(json["error"]["message"].as_str().unwrap().contains("not found"));
+}
+
+#[test]
+fn references_speak_in_lines_and_text_not_columns() {
+    let Some(ty) = ty_server_cmd() else {
+        eprintln!("skipping: ty not on PATH (install: curl -LsSf https://astral.sh/ty/install.sh | sh)");
+        return;
+    };
+    let ws = workspace("references", &sample_files());
+    let (ok, json) = run(&ws, &ty, &["references", "sample.py", "greet"]);
+    assert!(ok, "expected exit 0, got {json}");
+
+    assert_eq!(json["target"], "greet");
+    assert_eq!(json["resolved"], serde_json::json!({"file": "sample.py", "line": 1, "from": "symbol"}));
+    assert_eq!(json["count"], 4);
+    assert!(json.get("locations").is_none(), "raw Locations must be behind --raw");
+
+    let refs = json["references"].as_array().unwrap();
+    assert_eq!(refs.len(), 4);
+    for r in refs {
+        // Agent-appropriate: 1-indexed line + source text, never a UTF-16 column.
+        assert!(r.get("character").is_none(), "references must not leak columns");
+        assert!(r["line"].as_u64().unwrap() >= 1, "lines are 1-indexed");
+        assert!(r["text"].is_string());
+    }
+    // The declaration, found across the import boundary.
+    assert!(refs.iter().any(|r| r["file"] == "sample.py" && r["line"] == 1
+        && r["text"] == "def greet(name: str) -> str:"));
+    assert!(refs.iter().any(|r| r["file"] == "consumer.py"
+        && r["text"] == "from sample import greet"));
+}
+
+#[test]
+fn references_raw_exposes_the_protocol_locations() {
+    let Some(ty) = ty_server_cmd() else {
+        eprintln!("skipping: ty not on PATH (install: curl -LsSf https://astral.sh/ty/install.sh | sh)");
+        return;
+    };
+    let ws = workspace("references-raw", &sample_files());
+    let (ok, json) = run(&ws, &ty, &["references", "sample.py", "greet", "--raw"]);
+    assert!(ok, "expected exit 0, got {json}");
+    let locs = json["locations"].as_array().unwrap();
+    assert_eq!(locs.len(), 4);
+    // The raw form keeps the protocol shape (ranges with UTF-16 columns).
+    assert!(locs[0]["range"]["start"]["character"].is_u64());
+}
+
+#[test]
+fn diagnostics_are_agent_legible() {
+    let Some(ty) = ty_server_cmd() else {
+        eprintln!("skipping: ty not on PATH (install: curl -LsSf https://astral.sh/ty/install.sh | sh)");
+        return;
+    };
+    let ws = workspace("diagnostics", &sample_files());
+    let (ok, json) = run(&ws, &ty, &["diagnostics", "sample.py"]);
+    assert!(ok, "expected exit 0, got {json}");
+
+    assert_eq!(json["count"], 1, "the deliberate greet(123) type error");
+    assert!(json.get("raw").is_none(), "raw diagnostics must be behind --raw");
+
+    let d = &json["diagnostics"][0];
+    assert_eq!(d["severity"], "error", "severity is a word, not an int");
+    assert_eq!(d["line"], 6, "1-indexed line of `message = greet(123)`");
+    assert_eq!(d["code"], "invalid-argument-type");
+    assert_eq!(d["source"], "ty");
+    assert!(d["text"].as_str().unwrap().contains("greet(123)"), "the offending source line");
+    assert!(d.get("range").is_none(), "no protocol ranges in the rendered diagnostic");
+    // Related-location context, also in 1-indexed lines.
+    let related = d["related"].as_array().unwrap();
+    assert!(!related.is_empty());
+    assert!(related.iter().all(|r| r["line"].as_u64().unwrap() >= 1 && r["file"].is_string()));
+}
+
+#[test]
+fn diagnostics_raw_exposes_the_protocol_diagnostics() {
+    let Some(ty) = ty_server_cmd() else {
+        eprintln!("skipping: ty not on PATH (install: curl -LsSf https://astral.sh/ty/install.sh | sh)");
+        return;
+    };
+    let ws = workspace("diagnostics-raw", &sample_files());
+    let (ok, json) = run(&ws, &ty, &["diagnostics", "sample.py", "--raw"]);
+    assert!(ok, "expected exit 0, got {json}");
+    let raw = json["raw"].as_array().unwrap();
+    assert_eq!(raw.len(), 1);
+    assert!(raw[0]["range"]["start"]["line"].is_u64(), "raw keeps the protocol range");
+}
+
+// --- Usage errors (no ty needed: clap fails before any server is spawned) ---
+
+#[test]
+fn usage_errors_are_json_on_stdout_not_clap_prose() {
+    let out = Command::new(env!("CARGO_BIN_EXE_lsp4a"))
+        .arg("rename") // missing <FILE> <TARGET> <NEW_NAME>
+        .output()
+        .expect("spawn lsp4a");
+    assert_eq!(out.status.code(), Some(2), "usage errors exit 2 (distinct from runtime's 1)");
+    assert!(out.stderr.is_empty(), "no prose on stderr — the error is JSON on stdout");
+    let json: Value =
+        serde_json::from_slice(&out.stdout).expect("usage error must be JSON on stdout");
+    assert!(json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("missing required argument"));
+    assert_eq!(json["error"]["usage"], "lsp4a rename <FILE> <TARGET> <NEW_NAME>");
+}
+
+#[test]
+fn missing_subcommand_is_a_structured_usage_error() {
+    let out = Command::new(env!("CARGO_BIN_EXE_lsp4a")).output().expect("spawn lsp4a");
+    assert_eq!(out.status.code(), Some(2));
+    let json: Value = serde_json::from_slice(&out.stdout).expect("must be JSON on stdout");
+    assert!(json["error"]["message"].as_str().unwrap().contains("subcommand is required"));
+}
+
+#[test]
+fn help_and_version_are_not_errors() {
+    for flag in ["--help", "--version"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_lsp4a")).arg(flag).output().expect("spawn lsp4a");
+        assert!(out.status.success(), "{flag} should exit 0");
+        assert!(!out.stdout.is_empty(), "{flag} prints to stdout");
+    }
 }

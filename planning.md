@@ -22,6 +22,14 @@ A working v0 of `lsp4a` exists in [`lsp4a/`](./lsp4a/):
   for callers that apply it themselves. This is the output-side counterpart to
   the input-side symbol-resolution layer: the same impedance transformer that
   research.md § "the v0 interface leaked positions" warned must not leak.
+- **Uniform agent-legible output across verbs.** `references` and `diagnostics`
+  speak the same language as `rename` — 1-indexed lines + source text, never
+  UTF-16 columns or 0-indexed coordinates; `diagnostics` maps severity to a word
+  and carries related-location context. Each verb takes `--raw` to also emit the
+  underlying protocol object. The server's own logs are suppressed unless
+  `--debug` (a global flag), so the JSON is the only thing on the output. Even
+  clap usage errors (missing/bad args) come back as the same `{"error": ...}`
+  envelope on stdout (exit 2, with a `usage` field), not prose on stderr.
 - **Stateless** (born → handshake → one op → die), with a per-response
   `--timeout` so a wedged server fails fast; debug perf metrics still to add.
 - **One language live: Python via ty**, run as `ty server` from PATH (ty is a
@@ -68,18 +76,19 @@ Ordered by agent value, not protocol completeness:
 Hygiene the research depends on, kept separate from the agent-value ordering
 above:
 
-- **End-to-end integration tests — landed for `rename`.** Unit tests cover the
-  pure parts (lexical scanner, URI handling, the WorkspaceEdit applier);
-  [`lsp4a/tests/rename.rs`](./lsp4a/tests/rename.rs) now runs the
-  *built* binary against fixture workspaces and asserts the JSON contract:
-  the structured preview, decoy comment/string filtering, `--raw`, cross-file
-  rename with `--apply` (and decoys untouched on disk), the shadowing →
-  structured-ambiguity error, the unknown-symbol error, and the `line:char`
-  escape hatch. This is the safety net the invasive protocol work below
-  (capability negotiation, a second server) leans on. Remaining gaps:
-  `references`/`diagnostics` have no integration coverage yet, and the
-  timeout / not-renameable error paths are asserted only via the ambiguity and
-  unknown-symbol cases — worth their own fixtures before the protocol churn.
+- **End-to-end integration tests — landed for all three verbs.** Unit tests
+  cover the pure parts (lexical scanner, URI handling, the WorkspaceEdit
+  applier); [`lsp4a/tests/cli.rs`](./lsp4a/tests/cli.rs) runs the *built* binary
+  against fixture workspaces and asserts the JSON contract: the structured rename
+  preview, decoy comment/string filtering, `--raw`, cross-file rename with
+  `--apply` (and decoys untouched on disk), the shadowing → structured-ambiguity
+  error, the unknown-symbol error, the `line:char` escape hatch, and that
+  `references`/`diagnostics` return 1-indexed lines + source text (never UTF-16
+  columns) with the protocol forms behind `--raw`. This is the safety net the
+  invasive protocol work below (capability negotiation, a second server) leans
+  on. Remaining gap: the timeout / not-renameable error paths are asserted only
+  via the ambiguity and unknown-symbol cases — worth their own fixtures before
+  the protocol churn.
   - **Fixture gotcha worth keeping:** the fixture workspace must live *outside*
     any enclosing project (the suite uses the system temp dir). ty walks up
     looking for project config, so a workspace nested under an outer project's

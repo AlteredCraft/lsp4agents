@@ -44,9 +44,13 @@ JSON on stdout. The settled shape:
   argument only anchors *which symbol is meant* — renaming from a caller's
   file is identical to renaming from the definition's.
 - **Agent-shaped failure.** Every wait on the server carries a `--timeout`
-  (default 30s), and all failures — wedged server, unknown symbol, ambiguity —
-  come back as `{"error": {"message", "data"?}}` on stdout with exit 1. An
-  agent never parses a panic off stderr or hangs on a dead subprocess.
+  (default 30s), and *every* failure — wedged server, unknown symbol, ambiguity,
+  even bad command-line arguments — comes back as `{"error": {"message",
+  "data"?}}` on stdout: exit 1 for runtime failures, exit 2 for usage errors
+  (which add a `usage` field). clap's argument-parsing errors are funneled into
+  the same envelope rather than printed as prose on stderr, so an agent only ever
+  parses stdout JSON and never hangs on a dead subprocess. (Server logs stay on
+  stderr and are suppressed unless `--debug`.)
 - **Harness integration.** A thin in-process tool shells out to the CLI;
   diagnostics ride a `post_edit` hook that aggregates type-checker + linter (the
   two have different jobs — ship both).
