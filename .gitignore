@@ -1,21 +1,8 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-.pytest_cache/
-.ruff_cache/
-
-# Virtual environments
-.venv/
-
-# MacOS-specific files
+# macOS
 .DS_Store
 
-# Vscode-specific files
+# Editor
 .vscode/
 
 # Rust build artifacts (Cargo.lock is kept — this is a binary, not a library)
-lsp-tool-rs/target/
+lsp4a/target/

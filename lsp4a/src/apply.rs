@@ -145,6 +145,53 @@ fn collect_text_edits(edit: &Value) -> Result<HashMap<String, Vec<TextEdit>>> {
     Ok(HashMap::new())
 }
 
+/// One changed source line: where it is and its text before/after the rename.
+pub struct ChangedLine {
+    pub path: PathBuf,
+    /// Zero-indexed line number (LSP numbering); the caller 1-indexes for display.
+    pub line: usize,
+    pub before: String,
+    pub after: String,
+}
+
+/// Summarize a WorkspaceEdit as `(file_count, edit_count, changed_lines)` for an
+/// agent-legible presentation — the impedance-transformer applied to the *output*
+/// (raw ranges/UTF-16 columns in, before/after source lines out).
+///
+/// `before`/`after` are computed from each file's *current* on-disk contents, so
+/// this is valid whether or not the edit is later applied — call it before
+/// `apply_workspace_edit`. Rename edits are single-line and newline-free, so line
+/// numbers are stable between before and after and one row per changed line reads
+/// cleanly even when several edits land on the same line.
+pub fn summarize_workspace_edit(edit: &Value) -> Result<(usize, usize, Vec<ChangedLine>)> {
+    let by_uri = collect_text_edits(edit)?;
+    let file_count = by_uri.len();
+    let mut edit_count = 0;
+    let mut rows = Vec::new();
+    for (uri, edits) in &by_uri {
+        edit_count += edits.len();
+        let path = uri_to_path(uri);
+        let original =
+            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let updated = apply_text_edits(&original, edits);
+        let orig_lines: Vec<&str> = original.lines().collect();
+        let new_lines: Vec<&str> = updated.lines().collect();
+
+        let mut lines: Vec<usize> = edits.iter().map(|e| e.range.start.line).collect();
+        lines.sort_unstable();
+        lines.dedup();
+        for line in lines {
+            rows.push(ChangedLine {
+                path: path.clone(),
+                line,
+                before: orig_lines.get(line).map_or(String::new(), |s| s.trim_end().to_string()),
+                after: new_lines.get(line).map_or(String::new(), |s| s.trim_end().to_string()),
+            });
+        }
+    }
+    Ok((file_count, edit_count, rows))
+}
+
 /// Apply a WorkspaceEdit to files on disk. Returns the list of changed paths.
 pub fn apply_workspace_edit(edit: &Value) -> Result<Vec<String>> {
     let mut changed = Vec::new();

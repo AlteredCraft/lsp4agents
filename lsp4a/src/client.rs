@@ -45,7 +45,7 @@ impl Client {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .with_context(|| format!("spawning language server: {server_cmd}"))?;
+            .map_err(|e| spawn_error(e, server_cmd, cmd))?;
 
         let stdin = child.stdin.take().context("no stdin")?;
         let stdout = child.stdout.take().context("no stdout")?;
@@ -66,7 +66,7 @@ impl Client {
             "initialize",
             json!({
                 "processId": null,
-                "clientInfo": {"name": "lsp-tool", "version": "0.1.0"},
+                "clientInfo": {"name": "lsp4a", "version": "0.1.0"},
                 "rootUri": root_uri,
                 "capabilities": {
                     "general": {"positionEncodings": ["utf-16"]},
@@ -261,6 +261,21 @@ impl Client {
         }
         let _ = self.child.kill();
         Ok(())
+    }
+}
+
+/// Turn a spawn failure into an actionable message. A missing server is the
+/// common case (BYO model), so point at how to install ty rather than leaking a
+/// raw errno; other failures keep their OS context.
+fn spawn_error(e: std::io::Error, server_cmd: &str, cmd: &str) -> anyhow::Error {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        anyhow::anyhow!(
+            "language server {cmd:?} not found. Install ty (a standalone binary, no Python) with:\n  \
+             curl -LsSf https://astral.sh/ty/install.sh | sh\n\
+             then make sure it's on PATH, or pass --server-cmd for a different server."
+        )
+    } else {
+        anyhow::Error::new(e).context(format!("spawning language server: {server_cmd}"))
     }
 }
 

@@ -1,9 +1,13 @@
-//! lsp-tool (v0) — a stateless, hand-rolled LSP CLI that drives ty.
+//! lsp4a (v0) — a stateless, hand-rolled LSP CLI for agents, driving ty.
 //!
 //! Subcommands emit JSON on stdout (the server's own logs go to stderr):
-//!   lsp-tool diagnostics <file>
-//!   lsp-tool rename <file> <target> <new-name> [--apply]
-//!   lsp-tool references <file> <target>
+//!   lsp4a diagnostics <file>
+//!   lsp4a rename <file> <target> <new-name> [--apply] [--raw]
+//!   lsp4a references <file> <target>
+//!
+//! `rename` returns a structured summary — status, scope (files/edits), and a
+//! before/after row per changed line — never a raw WorkspaceEdit (that's behind
+//! `--raw`). The agent reads the result without parsing protocol coordinates.
 //!
 //! `<target>` is a symbol name (`greet`) — the tool resolves it to protocol
 //! coordinates so the caller never counts columns — or an explicit
@@ -56,16 +60,16 @@ impl fmt::Display for ToolError {
 impl std::error::Error for ToolError {}
 
 #[derive(Parser)]
-#[command(name = "lsp-tool", version, about = "Stateless LSP rename/references/diagnostics CLI (v0, ty)")]
+#[command(name = "lsp4a", version, about = "Stateless LSP rename/references/diagnostics CLI for agents (v0, ty)")]
 struct Cli {
     /// Workspace root (rootUri). File paths are resolved against it.
     #[arg(long, default_value = ".")]
     workspace: PathBuf,
 
-    /// Language-server command (whitespace-split). Default is the uv-managed ty
-    /// binary (`uv sync` puts it at `.venv/bin/ty`) — exec'd directly, no `uv
-    /// run` wrapper. Override per language.
-    #[arg(long, default_value = ".venv/bin/ty server")]
+    /// Language-server command (whitespace-split). Defaults to `ty` on PATH —
+    /// ty is a standalone binary (no Python); install it with
+    /// `curl -LsSf https://astral.sh/ty/install.sh | sh`. Override per language.
+    #[arg(long, default_value = "ty server")]
     server_cmd: String,
 
     /// Seconds to wait for any single server response before failing.
@@ -82,15 +86,20 @@ enum Command {
     Diagnostics {
         file: String,
     },
-    /// Rename a symbol; prints the WorkspaceEdit (or applies it with --apply).
+    /// Rename a symbol; prints a structured before/after summary of the change
+    /// (or applies it to disk with --apply).
     Rename {
         file: String,
         /// Symbol name, or `line:character` (zero-indexed, UTF-16 column).
         target: String,
         new_name: String,
-        /// Apply the edit to disk instead of just printing it.
+        /// Apply the edit to disk instead of only previewing it.
         #[arg(long)]
         apply: bool,
+        /// Also include the raw LSP WorkspaceEdit under `edit` (for callers that
+        /// want to apply it themselves). Off by default — the summary is the contract.
+        #[arg(long)]
+        raw: bool,
     },
     /// List every reference to a symbol (declaration included).
     References {
@@ -126,18 +135,19 @@ fn run(cli: &Cli) -> Result<Value> {
             let diagnostics = client.diagnostics(&uri)?;
             json!({"file": file, "diagnostics": diagnostics})
         }
-        Command::Rename { file, target, new_name, apply } => {
+        Command::Rename { file, target, new_name, apply, raw } => {
             let abs = client::resolve(&workspace, file)?;
             let uri = client.did_open(&abs, language_id(&abs))?;
             let (line, character, resolved_from) = locate(&mut client, &uri, &abs, file, target)?;
+            let _ = character; // resolved column is internal; the summary speaks in source lines
             let edit = client.rename(&uri, line, character, new_name)?;
-            let target_json = json!({"line": line, "character": character, "resolved_from": resolved_from});
+            // Build the summary from the pre-apply file contents, then apply.
+            let result =
+                render_rename_result(&workspace, &edit, file, target, new_name, line, resolved_from, *apply, *raw)?;
             if *apply {
-                let changed = apply::apply_workspace_edit(&edit)?;
-                json!({"applied": true, "target": target_json, "files_changed": changed, "edit": edit})
-            } else {
-                json!({"applied": false, "target": target_json, "edit": edit})
+                apply::apply_workspace_edit(&edit)?;
             }
+            result
         }
         Command::References { file, target } => {
             let abs = client::resolve(&workspace, file)?;
@@ -175,6 +185,48 @@ fn locate(
             Ok((line, character, "symbol"))
         }
     }
+}
+
+/// A WorkspaceEdit → an agent-legible rename result: success/fail status, the
+/// scope of the change (how many files/edits), and a before/after row per changed
+/// line. This is the output-side impedance transformer — the caller never has to
+/// parse ranges or UTF-16 columns out of a raw WorkspaceEdit. The raw edit is
+/// included under `edit` only when `raw` is set.
+#[allow(clippy::too_many_arguments)]
+fn render_rename_result(
+    workspace: &Path,
+    edit: &Value,
+    file: &str,
+    target: &str,
+    new_name: &str,
+    resolved_line: usize,
+    resolved_from: &str,
+    applied: bool,
+    raw: bool,
+) -> Result<Value> {
+    let (files, edits, mut rows) = apply::summarize_workspace_edit(edit)?;
+    rows.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
+    let changes: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            let rel = r.path.strip_prefix(workspace).unwrap_or(&r.path).display().to_string();
+            // Lines 1-indexed for display (editors count from 1); the before/after
+            // text carries the change, so no column is exposed.
+            json!({"file": rel, "line": r.line + 1, "before": r.before, "after": r.after})
+        })
+        .collect();
+    let mut out = json!({
+        "status": if applied { "applied" } else { "preview" },
+        "target": target,
+        "renamed_to": new_name,
+        "resolved": {"file": file, "line": resolved_line + 1, "from": resolved_from},
+        "scope": {"files": files, "edits": edits},
+        "changes": changes,
+    });
+    if raw {
+        out["edit"] = edit.clone();
+    }
+    Ok(out)
 }
 
 /// LSP Locations → `{file, line, character, text}` rows, paths relative to the

@@ -1,9 +1,9 @@
 # Architecture & LSP reference
 
-The decided architecture of `lsp-tool` and the LSP protocol substrate it rests
+The decided architecture of `lsp4a` and the LSP protocol substrate it rests
 on. For *why* each choice was made, see [research.md](./research.md); for
-*what's next*, see [planning.md](./planning.md). The runnable protocol spike is
-[`lsp_raw_client.py`](./lsp_raw_client.py).
+*what's next*, see [planning.md](./planning.md). The implementation is in
+[`lsp4a/`](./lsp4a/).
 
 All spec links point at **LSP 3.17**:
 <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/>
@@ -12,7 +12,7 @@ All spec links point at **LSP 3.17**:
 
 ## Architecture (decided)
 
-`lsp-tool` is a small **stateless Rust CLI** an LLM agent harness shells out to
+`lsp4a` is a small **stateless Rust CLI** an LLM agent harness shells out to
 for semantic code operations — today `rename`, `references`, and `diagnostics`,
 JSON on stdout. The settled shape:
 
@@ -51,14 +51,14 @@ JSON on stdout. The settled shape:
   diagnostics ride a `post_edit` hook that aggregates type-checker + linter (the
   two have different jobs — ship both).
 
-**Implementation:** Rust, in [`lsp-tool-rs/`](./lsp-tool-rs/).
+**Implementation:** Rust, in [`lsp4a/`](./lsp4a/).
 
 **Language servers (bring-your-own).** Pin a version per language for
 reproducibility.
 
 | lang | server | acquire | default command |
 |---|---|---|---|
-| **Python** | **ty** | **`uv sync` → `.venv/bin/ty`** | **`.venv/bin/ty server`** |
+| **Python** | **ty** | **`curl -LsSf https://astral.sh/ty/install.sh \| sh`** (standalone binary, no Python) | **`ty server`** |
 | Go | gopls | `go install golang.org/x/tools/gopls@latest` | `gopls` |
 | Rust | rust-analyzer | `rustup component add rust-analyzer` | `rust-analyzer` |
 | TS | typescript-language-server | `npm i -g typescript-language-server` | `typescript-language-server --stdio` |
@@ -243,4 +243,4 @@ synthesize the edit list.
 - [LSP 3.17 specification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/)
 - [JSON-RPC 2.0](https://www.jsonrpc.org/specification)
 - [ty docs](https://docs.astral.sh/ty/)
-- This repo: [README.md](./README.md) · [`lsp_raw_client.py`](./lsp_raw_client.py) · [`test_apply.py`](./test_apply.py)
+- This repo: [README.md](./README.md) · [`lsp4a/`](./lsp4a/)

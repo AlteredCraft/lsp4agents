@@ -1,6 +1,6 @@
 # Research & rationale
 
-The *why* behind `lsp-tool` — the framing, the trade-offs, and the evidence
+The *why* behind `lsp4a` — the framing, the trade-offs, and the evidence
 behind each decision. The decisions themselves live as settled architecture in
 [documentation.md](./documentation.md); what's next is in
 [planning.md](./planning.md). This file is the archive of how we got there.
@@ -109,7 +109,7 @@ Calibrating the verbs against what agents can't already do:
 - **`diagnostics` is the soft spot.** Most type checkers ship batch CLIs —
   `ty check`, `tsc --noEmit`, `gopls check`, `rust-analyzer diagnostics` — so
   an agent (or a post-edit hook) gets the same answer with `subprocess.run`
-  and zero protocol plumbing. In the stateless v0, `lsp-tool diagnostics` is
+  and zero protocol plumbing. In the stateless v0, `lsp4a diagnostics` is
   a more elaborate `ty check`. The LSP route earns its keep only once a warm
   daemon makes it *incremental* — another reason the daemon is on the
   critical path. The verb stays (one interface, and it's nearly free once
@@ -119,8 +119,12 @@ Calibrating the verbs against what agents can't already do:
 The tool doesn't bundle servers (bundling N servers × M platforms is a release
 nightmare). Each is BYO on a known path, with per-language acquire instructions
 and "detect missing → fail fast with an install hint." Pin a version per language
-so rename/diagnostics stay reproducible. Python is decided: uv acquires + pins ty
-via `uv.lock`, and the tool execs `.venv/bin/ty` directly (no `uv run` wrapper).
+so rename/diagnostics stay reproducible. Python is decided: **ty is a standalone
+binary (no Python runtime)** installed onto PATH via Astral's version-pinned
+installer (`curl -LsSf https://astral.sh/ty/<version>/install.sh | sh`); the tool
+runs `ty server` from PATH. (An earlier iteration acquired ty as a PyPI
+dependency through a uv-managed `.venv` — needless Python coupling for what is
+already a native binary; dropped.)
 
 ### Rust, hand-rolled (not Python / multilspy)
 Settled by the v0 comparison below. In short: multilspy abstracts only the
@@ -137,10 +141,12 @@ path.
 Two implementations of the same CLI contract (`rename` + `diagnostics`, JSON
 out), built to put evidence behind the build-vs-reuse question:
 
-- **`lsp-tool-rs/`** — hand-rolled Rust, drives **ty**. Framing, lifecycle, and
+- **`lsp4a/`** — hand-rolled Rust, drives **ty**. Framing, lifecycle, and
   the WorkspaceEdit applier are all written here. **(The chosen implementation.)**
 - **`lsp-tool-py/`** — Python on **multilspy**, which drives
-  **jedi-language-server** (no server choice). **(An early trial.)**
+  **jedi-language-server** (no server choice). **(An early trial, since removed
+  now that Rust is settled — kept in git history; the findings below are the
+  evidence it left behind.)**
 
 Both were run against this repo's `sample.py` / `consumer.py`.
 
