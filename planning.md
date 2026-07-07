@@ -51,12 +51,24 @@ schedule.
 
 Ordered by agent value, not protocol completeness:
 
-1. **Capability negotiation.** The v0 still hardcodes most of ty's shape (pull
-   diagnostics with push fallback, `prepareRename`); pointing `--server-cmd` at
-   jedi broke on `Method Not Found: textDocument/diagnostic`. Branch on the
-   server's advertised capabilities (started: `referencesProvider` and
-   `positionEncoding` are checked; the rest isn't). (See
-   [research.md](./research.md) § "spawn-decoupled, but protocol-coupled".)
+1. **Capability negotiation.** The v0 still hardcodes most of ty's shape and
+   assumes ty's answers hold for any server. Branch on the server's advertised
+   `initialize` capabilities instead. Started: `positionEncoding` is guarded
+   (a non-utf-16 server fails fast rather than corrupting edits),
+   `referencesProvider` gates `references`, and `diagnostics` now gates the pull
+   request on `diagnosticProvider` and degrades to pushed diagnostics otherwise
+   — so a push-only server (the jedi `Method Not Found:
+   textDocument/diagnostic` break) no longer errors. Still unbranched:
+   `rename`/`prepareRename` fire unconditionally, and `prepare_rename` swallows
+   *all* errors as "not renameable," conflating "server lacks rename support"
+   with "this position isn't renameable" — gate on `renameProvider` and
+   distinguish the two.
+   Sequencing: this is the enabling half of "add a second server" (#2), not a
+   solo sprint. ty advertises everything the v0 assumes, so with only ty on the
+   bench the remaining branches can't be exercised — land them together with
+   gopls, driven by its concrete capability set rather than speculation off one
+   jedi error. (See [research.md](./research.md) §
+   "spawn-decoupled, but protocol-coupled".)
 2. **Second language: gopls.** The first real test of the multi-language
    backend, the per-language acquire path, and the indexing readiness-wait.
    Note: for gopls/rust-analyzer-class servers the warm daemon (below) is

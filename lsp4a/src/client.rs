@@ -178,20 +178,37 @@ impl Client {
         Ok(uri)
     }
 
-    /// Pull diagnostics (textDocument/diagnostic). Falls back to whatever the
-    /// server pushed if pull returns nothing.
+    /// Diagnostics for a document. Prefers pull (textDocument/diagnostic) when
+    /// the server advertises it, and otherwise — or when pull comes back empty —
+    /// falls back to whatever the server pushed via publishDiagnostics.
     pub fn diagnostics(&mut self, uri: &str) -> Result<Value> {
-        let id = self.request(
-            "textDocument/diagnostic",
-            json!({"textDocument": {"uri": uri}}),
-        )?;
-        let report = self.wait_for_id(id)?;
-        let items = report.get("items").cloned().unwrap_or(Value::Null);
-        if items.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
-            return Ok(items);
+        // Only issue a pull request if the server advertises support. A
+        // push-only server (e.g. jedi) answers textDocument/diagnostic with
+        // "Method Not Found", which wait_for_id surfaces as a hard error — so
+        // without this capability gate the pushed-diagnostics fallback below is
+        // unreachable for exactly the servers that need it.
+        let pull_supported = !self
+            .capabilities
+            .get("diagnosticProvider")
+            .is_none_or(Value::is_null);
+        if pull_supported {
+            let id = self.request(
+                "textDocument/diagnostic",
+                json!({"textDocument": {"uri": uri}}),
+            )?;
+            let report = self.wait_for_id(id)?;
+            let items = report.get("items").cloned().unwrap_or(Value::Null);
+            if items.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+                return Ok(items);
+            }
         }
-        // Pull was empty/unsupported — use the pushed set if present.
-        Ok(self.pushed_diagnostics.get(uri).cloned().unwrap_or(items))
+        // Pull unsupported or empty — use the pushed set if present, else an
+        // empty list ("no diagnostics"), never null.
+        Ok(self
+            .pushed_diagnostics
+            .get(uri)
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())))
     }
 
     /// textDocument/prepareRename — `Ok(None)` means "not renameable here".
